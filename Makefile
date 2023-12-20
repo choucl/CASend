@@ -15,7 +15,7 @@ __dir := $(shell mkdir -p $(BUILD_DIR))
 
 DEBUG = -g
 CFLAGS = -Wall -I$(INC_DIR) $(DEBUG)
-LDFLAGS = 
+LDFLAGS = -lpthread
 
 .PHONY: clean all
 
