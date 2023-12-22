@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
+#include <math.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -9,6 +11,58 @@
 #include <sock.h>
 
 static pthread_mutex_t mutex;
+
+typedef enum service_status {
+    WAITING_RECV,
+    WAITING_ACK,
+    WAITING_DATA
+} service_status_t;
+
+typedef struct service_entry service_entry_t;
+
+struct service_entry {
+    int code;
+    int clientfd;
+    service_status_t status;
+    service_entry_t *left;
+    service_entry_t *right;
+};
+
+service_entry_t *root_entry;
+
+static int gen_code(int code_length) {
+    srand(time(NULL));
+    return rand() % (int)pow(10, code_length);
+}
+
+static service_entry_t* create_entry(int clientfd, int code_length) {
+    service_entry_t *new_entry = malloc(sizeof(service_entry_t));
+    new_entry->code = gen_code(code_length);
+    new_entry->clientfd = clientfd;
+    new_entry->status = WAITING_RECV;
+    new_entry->left = NULL;
+    new_entry->right = NULL;
+    return new_entry;
+}
+
+static service_entry_t* insert_entry(service_entry_t* entry) {
+    if (root_entry == NULL) return entry;
+    service_entry_t* cur_entry = root_entry;
+    do {
+        if (entry->code < cur_entry->code) {
+            if (cur_entry->left == NULL) {
+                cur_entry->left = entry;
+                break;
+            } else cur_entry = cur_entry->left;
+        } else {
+            if (cur_entry->right == NULL) {
+                cur_entry->right = entry;
+                break;
+            } else cur_entry = cur_entry->right;
+        }
+    } while (1);
+    return root_entry;
+}
 
 static void die(char *msg)
 {
