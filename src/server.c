@@ -184,6 +184,10 @@ int main(int argc , char *argv[]) {
     }
 
     int listenfd __attribute__((unused)) = open_listenfd(server_port);
+    if (listenfd == -1) {
+        printf("Unable to open with port: %s\n", server_port);
+        return -1;
+    }
     printf("listening on the port %s\n", server_port);
 
     pthread_mutex_init(&mutex, NULL);
