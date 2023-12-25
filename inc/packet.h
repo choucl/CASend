@@ -4,6 +4,7 @@
 
 typedef enum opcode {
     kOpAck = 0,
+    kOpError,
     kOpCreate,
     kOpRequest,
     kOpPub,

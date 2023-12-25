@@ -27,6 +27,7 @@ typedef struct service_entry service_entry_t;
 struct service_entry {
     int code;  // generated code
     int clientfd;
+    char *pub_key;
     service_status_t status;
     service_entry_t *left;
     service_entry_t *right;
@@ -39,19 +40,20 @@ static int gen_code(int code_length) {
     return rand() % (int)pow(10, code_length);
 }
 
-static service_entry_t* create_entry(int clientfd, int code_length) {
+static service_entry_t *create_entry(int clientfd, int code_length) {
     service_entry_t *new_entry = malloc(sizeof(service_entry_t));
     new_entry->code = gen_code(code_length);
     new_entry->clientfd = clientfd;
     new_entry->status = kWaitingRecv;
+    new_entry->pub_key = NULL;
     new_entry->left = NULL;
     new_entry->right = NULL;
     return new_entry;
 }
 
-static service_entry_t* insert_entry(service_entry_t* entry) {
+static service_entry_t *insert_entry(service_entry_t* entry) {
     if (root_entry == NULL) return entry;
-    service_entry_t* cur_entry = root_entry;
+    service_entry_t *cur_entry = root_entry;
     do {
         if (entry->code < cur_entry->code) {
             if (cur_entry->left == NULL) {
@@ -66,6 +68,22 @@ static service_entry_t* insert_entry(service_entry_t* entry) {
         }
     } while (1);
     return root_entry;
+}
+
+static service_entry_t *search_entry(int code) {
+    service_entry_t *cur_entry = root_entry;
+    while (1) {
+        if (cur_entry != NULL) {
+            if (code == cur_entry->code)
+                return cur_entry;
+            else if (code < cur_entry->code)
+                cur_entry = cur_entry->left;
+            else
+                cur_entry = cur_entry->right;
+        } else {  // not found
+            return NULL;
+        }
+    }
 }
 
 static void die(char *msg)
@@ -96,19 +114,37 @@ static void *serve(void *argp)
                             0, sizeof(const int), (char *)&new_entry->code);
         send(clientfd, send_payload, sizeof(packet_payload_t), 0);
     } else if (recv_header->opcode == kOpRequest) {  // receiver request
+        // receive code
         if (recv(clientfd, recv_payload, sizeof(packet_payload_t), 0) != 0) {
-            printf("error: clientfd: %ld. Invalid request payload\n", clientfd);
+            printf("error: recv code payload. clientfd: %ld.\n", clientfd);
             return 0;
         }
+        int recv_code = (int)*recv_payload->payload;
         
+        // receive public key
+        if (recv(clientfd, recv_payload, sizeof(packet_payload_t), 0) != 0) {
+            printf("error: recv code payload. clientfd: %ld.\n", clientfd);
+            return 0;
+        }
+        char *pub_key = recv_payload->payload;
+        
+        service_entry_t *entry = search_entry(recv_code);
+        if (entry) {
+            entry->pub_key = pub_key;
+            pack_packet_header(send_header, kOpAck, kNone, 0);
+            send(clientfd, send_header, sizeof(packet_header_t), 0);
+        } else {
+            pack_packet_header(send_header, kOpError, kNone, 0);
+            send(clientfd, send_header, sizeof(packet_header_t), 0);
+            printf("error: recv code not found. clientfd: %ld.\n", clientfd);
+            return 0;
+        }
         
     } else {  // invalid situation
         printf("error: clientfd: %ld. Invalid packet_header opcode: %d\n", 
                clientfd, recv_header->opcode);
         return 0;
     }
-    char message[] = {"Sever connected.\n"};
-    send(clientfd, message, sizeof(message), 0);
     return 0;
 }
 
