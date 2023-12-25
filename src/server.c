@@ -106,13 +106,29 @@ static void *serve(void *argp)
     }
     if (recv_header->opcode == kOpCreate) {  // sender request
         service_entry_t *new_entry = create_entry(clientfd, kCodeLength);
+        pthread_mutex_lock(&mutex);
         root_entry = insert_entry(new_entry);
-        pack_packet_header(send_header, 
-                           kOpAck, kCode, sizeof(const int));
+        pthread_mutex_unlock(&mutex);
+        pack_packet_header(send_header, kOpAck, kCode, sizeof(const int));
         send(clientfd, send_header, sizeof(packet_header_t), 0);
         pack_packet_payload(send_payload,
                             0, sizeof(const int), (char *)&new_entry->code);
         send(clientfd, send_payload, sizeof(packet_payload_t), 0);
+        
+        // wait until receiver public key delivered
+        while (new_entry->pub_key == NULL);
+        pack_packet_header(send_header, kOpPub, kPubKey, 64);
+        send(clientfd, send_header, sizeof(packet_header_t), 0);
+        pack_packet_payload(send_payload,
+                            0, 64, (char *)&new_entry->pub_key);
+        send(clientfd, send_payload, sizeof(packet_payload_t), 0);
+
+        // wait sender ack
+        do {
+            while (recv(clientfd, recv_header, 
+                        sizeof(packet_header_t), 0) != 0);
+        } while (recv_header->opcode != kOpAck);
+
     } else if (recv_header->opcode == kOpRequest) {  // receiver request
         // receive code
         if (recv(clientfd, recv_payload, sizeof(packet_payload_t), 0) != 0) {
@@ -126,7 +142,8 @@ static void *serve(void *argp)
             printf("error: recv code payload. clientfd: %ld.\n", clientfd);
             return 0;
         }
-        char *pub_key = recv_payload->payload;
+        char *pub_key = malloc(recv_payload->cur_payload_size);
+        strncpy(pub_key, recv_payload->payload, recv_payload->cur_payload_size);
         
         service_entry_t *entry = search_entry(recv_code);
         if (entry) {
@@ -179,6 +196,7 @@ int main(int argc , char *argv[]) {
         printf("info: thread %ld created, serving connection fd %ld\n",
                (long)thread, clientfd);
     }
+    pthread_mutex_destroy(&mutex);
 
     return 0;
 }
