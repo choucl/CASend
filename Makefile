@@ -15,13 +15,13 @@ __dir := $(shell mkdir -p $(BUILD_DIR))
 
 DEBUG = -g
 CFLAGS = -Wall -I$(INC_DIR) $(DEBUG)
-LDFLAGS = -lpthread
+LDFLAGS = -lpthread -lm
 
 .PHONY: clean all
 
 all: $(OBJECTS) $(SERVER_TARGET) $(CLIENT_TARGET)
 
-$(SERVER_TARGET): $(addprefix $(BUILD_DIR)/, server.o sock.o)
+$(SERVER_TARGET): $(addprefix $(BUILD_DIR)/, server.o sock.o util.o)
 	@echo [LINK] $@
 	@$(CC) -o $@ $^ $(LDFLAGS)
 
