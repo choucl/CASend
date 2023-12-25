@@ -8,20 +8,24 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <pthread.h>
-#include <sock.h>
+#include "sock.h"
+#include "packet.h"
+#include "util.h"
+
+const int kCodeLength = 6;
 
 static pthread_mutex_t mutex;
 
 typedef enum service_status {
-    WAITING_RECV,
-    WAITING_ACK,
-    WAITING_DATA
+    kWaitingRecv,
+    kWaitingAck,
+    kWaitingData
 } service_status_t;
 
 typedef struct service_entry service_entry_t;
 
 struct service_entry {
-    int code;
+    int code;  // generated code
     int clientfd;
     service_status_t status;
     service_entry_t *left;
@@ -39,7 +43,7 @@ static service_entry_t* create_entry(int clientfd, int code_length) {
     service_entry_t *new_entry = malloc(sizeof(service_entry_t));
     new_entry->code = gen_code(code_length);
     new_entry->clientfd = clientfd;
-    new_entry->status = WAITING_RECV;
+    new_entry->status = kWaitingRecv;
     new_entry->left = NULL;
     new_entry->right = NULL;
     return new_entry;
@@ -74,7 +78,36 @@ static void *serve(void *argp)
 {
     long clientfd = (long)argp;
     // do something
-    char message[] = {"Hi,this is server.\n"};
+    packet_header_t *recv_header = malloc(sizeof(packet_header_t));
+    packet_payload_t *recv_payload = malloc(sizeof(packet_payload_t));
+    packet_header_t *send_header = malloc(sizeof(packet_header_t));
+    packet_payload_t *send_payload = malloc(sizeof(packet_payload_t));
+    if (recv(clientfd, recv_header, sizeof(packet_header_t), 0) != 0) {
+        printf("error: clientfd: %ld. Invalid packet\n", clientfd);
+        return 0;
+    }
+    if (recv_header->opcode == kOpCreate) {  // sender request
+        service_entry_t *new_entry = create_entry(clientfd, kCodeLength);
+        root_entry = insert_entry(new_entry);
+        pack_packet_header(send_header, 
+                           kOpAck, kCode, sizeof(const int));
+        send(clientfd, send_header, sizeof(packet_header_t), 0);
+        pack_packet_payload(send_payload,
+                            0, sizeof(const int), (char *)&new_entry->code);
+        send(clientfd, send_payload, sizeof(packet_payload_t), 0);
+    } else if (recv_header->opcode == kOpRequest) {  // receiver request
+        if (recv(clientfd, recv_payload, sizeof(packet_payload_t), 0) != 0) {
+            printf("error: clientfd: %ld. Invalid request payload\n", clientfd);
+            return 0;
+        }
+        
+        
+    } else {  // invalid situation
+        printf("error: clientfd: %ld. Invalid packet_header opcode: %d\n", 
+               clientfd, recv_header->opcode);
+        return 0;
+    }
+    char message[] = {"Sever connected.\n"};
     send(clientfd, message, sizeof(message), 0);
     return 0;
 }
