@@ -100,7 +100,7 @@ static void *serve(void *argp)
     packet_payload_t *recv_payload = malloc(sizeof(packet_payload_t));
     packet_header_t *send_header = malloc(sizeof(packet_header_t));
     packet_payload_t *send_payload = malloc(sizeof(packet_payload_t));
-    if (recv(clientfd, recv_header, sizeof(packet_header_t), 0) != 0) {
+    if (recv(clientfd, recv_header, sizeof(packet_header_t), 0) == -1) {
         printf("error: clientfd: %ld. Invalid packet\n", clientfd);
         return 0;
     }
@@ -126,19 +126,19 @@ static void *serve(void *argp)
         // wait sender ack
         do {
             while (recv(clientfd, recv_header, 
-                        sizeof(packet_header_t), 0) != 0);
+                        sizeof(packet_header_t), 0) == -1);
         } while (recv_header->opcode != kOpAck);
 
     } else if (recv_header->opcode == kOpRequest) {  // receiver request
         // receive code
-        if (recv(clientfd, recv_payload, sizeof(packet_payload_t), 0) != 0) {
+        if (recv(clientfd, recv_payload, sizeof(packet_payload_t), 0) == -1) {
             printf("error: recv code payload. clientfd: %ld.\n", clientfd);
             return 0;
         }
         int recv_code = (int)*recv_payload->payload;
         
         // receive public key
-        if (recv(clientfd, recv_payload, sizeof(packet_payload_t), 0) != 0) {
+        if (recv(clientfd, recv_payload, sizeof(packet_payload_t), 0) == -1) {
             printf("error: recv code payload. clientfd: %ld.\n", clientfd);
             return 0;
         }
