@@ -195,6 +195,7 @@ int main(int argc , char *argv[]) {
         struct sockaddr client_info;
         socklen_t addrlen;
         long clientfd = accept(listenfd, &client_info, &addrlen);
+        if (clientfd == -1) continue;
         pthread_t thread;
         pthread_create(&thread, NULL, serve, (void *)clientfd);
         printf("info: thread %ld created, serving connection fd %ld\n",
