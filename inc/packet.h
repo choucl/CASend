@@ -12,6 +12,7 @@ enum opcode {
 };
 
 enum payload_type {
+    kNone,
     kCode,
     kPubKey,
     kData,
