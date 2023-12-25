@@ -2,22 +2,22 @@
 #define _PACKET_H
 #include <stddef.h>
 
-enum opcode {
+typedef enum opcode {
     kOpAck,
     kOpCreate,
     kOpRequest,
     kOpPub,
     kOpData,
     kOpFin
-};
+} opcode_t;
 
-enum payload_type {
+typedef enum payload_type {
     kNone,
     kCode,
     kPubKey,
     kData,
     kHash
-};
+} payload_type_t;
 
 struct packet_header {
     enum opcode opcode;
