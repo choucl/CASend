@@ -21,11 +21,11 @@ LDFLAGS = -lpthread
 
 all: $(OBJECTS) $(SERVER_TARGET) $(CLIENT_TARGET)
 
-$(SERVER_TARGET): $(addprefix $(BUILD_DIR)/, server.o sock.o)
+$(SERVER_TARGET): $(addprefix $(BUILD_DIR)/, server.o sock.o packet.o)
 	@echo [LINK] $@
 	@$(CC) -o $@ $^ $(LDFLAGS)
 
-$(CLIENT_TARGET): $(addprefix $(BUILD_DIR)/, client.o sock.o)
+$(CLIENT_TARGET): $(addprefix $(BUILD_DIR)/, client.o sock.o packet.o)
 	@echo [LINK] $@
 	@$(CC) -o $@ $^ $(LDFLAGS)
 
