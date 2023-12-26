@@ -3,7 +3,7 @@
 #include <stddef.h>
 
 typedef enum opcode {
-    kOpAck,
+    kOpAck = 0,
     kOpCreate,
     kOpRequest,
     kOpPub,
@@ -12,26 +12,41 @@ typedef enum opcode {
 } opcode_t;
 
 typedef enum payload_type {
-    kNone,
+    kNone = 0,
     kCode,
     kPubKey,
     kData,
     kHash
 } payload_type_t;
 
-struct packet_header {
-    enum opcode opcode;
-    enum payload_type payload_type;
-    size_t payload_length; // total length, in bytes
-};
+typedef char * packet_header_t;
+typedef char * packet_payload_t;
 
-struct packet_payload {
-    int num_packet;
-    size_t cur_payload_size;
-    char payload[1024];
-};
+// input: packet_header - unallocated packet_header_t pointer
+// return value:
+//   -1: error
+//   0 : correct
+int create_header(packet_header_t *packet_header, opcode_t opcode,
+                  payload_type_t payload_type, size_t payload_length);
 
-typedef struct packet_header packet_header_t;
-typedef struct packet_payload packet_payload_t;
+// input: packet_payload - unallocated packet_payload_t pointer
+// return value:
+//   -1    : error
+//   others: length of whole packet
+int create_payload(packet_payload_t *packet_payload, int num_packet,
+                   size_t cur_payload_size, char *payload);
+
+// helper functions to retrieve information
+opcode_t get_opcode(packet_header_t header);
+payload_type_t get_payload_type(packet_header_t header);
+size_t get_payload_length(packet_header_t header);
+int get_packet_num(packet_payload_t payload);
+size_t get_cur_payload_size(packet_payload_t payload);
+
+// input: dst - unallocated char * pointer
+// return value:
+//   -1: error
+//   0 : correct
+int copy_payload(packet_payload_t payload, char **dst);
 
 #endif  // _PACKET_H
