@@ -2,6 +2,10 @@
 #define _PACKET_H
 #include <stddef.h>
 
+#define HEADER_LENGTH  (3 * sizeof(int))
+#define GET_PAYLOAD_PACKET_LEN(payload_length) \
+            ((payload_length) + 2 * sizeof(int))
+
 typedef enum opcode {
     kOpAck = 0,
     kOpError,

@@ -20,7 +20,7 @@ int create_payload(packet_payload_t *packet_payload, int num_packet,
     if (*packet_payload == NULL) return -1;
     (*packet_payload)[0 * sizeof(int)] = num_packet;
     (*packet_payload)[1 * sizeof(int)] = cur_payload_size;
-    strncpy(&(*packet_payload)[2 * sizeof(int)], payload, cur_payload_size);
+    memcpy(&(*packet_payload)[2 * sizeof(int)], payload, cur_payload_size);
     return total_size;
 }
 
@@ -48,6 +48,6 @@ int copy_payload(packet_payload_t payload, char **dst) {
     size_t payload_size = get_cur_payload_size(payload);
     *dst = malloc(sizeof(char) * payload_size);
     if (*dst == NULL) return -1;
-    strncpy(*dst, &payload[2*sizeof(int)], payload_size);
+    memcpy(*dst, &payload[2*sizeof(int)], payload_size);
     return 0;
 }
