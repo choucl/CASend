@@ -98,7 +98,6 @@ static int send_intention_handler(service_entry_t **entry,
     *entry = create_table_entry(clientfd, CODE_LENGTH, name, name_length);
     pthread_mutex_unlock(&mutex);
     info(clientfd, "entry creation complete, code = %d", (*entry)->code);
-    free(recv_name_payload);
     
     // send code header
     info(clientfd, "sending ack header");
