@@ -28,6 +28,8 @@ struct service_entry {
     int code;  // generated code
     int clientfd;
     int name_length;
+    long sender_fd;
+    long receiver_fd;
     char *name;
     char *pub_key;
     service_status_t status;
@@ -54,6 +56,8 @@ static service_entry_t *create_table_entry(int clientfd, int code_length,
     new_entry->code = code;
     new_entry->clientfd = clientfd;
     new_entry->status = kWaitingRecv;
+    new_entry->sender_fd = clientfd;
+    new_entry->receiver_fd = -1;
     new_entry->name = name;
     new_entry->name_length = name_length;
     new_entry->pub_key = NULL;
@@ -189,6 +193,7 @@ static int receiver_request_handler(service_entry_t **entry, long clientfd) {
     packet_header_t send_ack_header;
     if (*entry) {  // entry found
         (*entry)->pub_key = pub_key;
+        (*entry)->receiver_fd = clientfd;
         status = create_header(&send_ack_header, kOpAck, kNone, 0);
         if (status == -1) {
             error(clientfd, "fail creating ack header");
@@ -223,71 +228,50 @@ REQ_ERR_RET0:
     return status;
 }
 
-int send_data_handler(long clientfd) {
+int send_data_handler(service_entry_t *entry) {
     int status = 0;
     int payload_buf_len = GET_PAYLOAD_PACKET_LEN(1024);
-    packet_header_t recv_data_header = malloc(HEADER_LENGTH);
-    packet_payload_t recv_data_payload = malloc(payload_buf_len);
-    packet_header_t recv_ack_header = malloc(HEADER_LENGTH);
-    packet_header_t send_ack_header;
-    status = create_header(&send_ack_header, kOpAck, kNone, 0);
-    if (status == -1) {
-        error(clientfd, "fail creating data ack");
-        return -1;
-    }
+    packet_header_t data_header = malloc(HEADER_LENGTH);
+    packet_payload_t data_payload = malloc(payload_buf_len);
+    packet_header_t ack_header = malloc(HEADER_LENGTH);
     while (1) {
-        status = recv(clientfd, recv_data_header, HEADER_LENGTH, 0);
+        status = recv(entry->sender_fd, data_header, HEADER_LENGTH, 0);
         if (status == -1) {
-            error(clientfd, "fail receiving data header");
+            error(entry->sender_fd, "fail receiving data header");
             break;
         }
-        if (get_opcode(recv_data_header) == kOpData) {
-            int payload_len = recv(clientfd, recv_data_payload, 
+        if (get_opcode(data_header) == kOpData) {
+            int payload_len = recv(entry->sender_fd, data_payload, 
                                    payload_buf_len, 0);
             if (payload_len == -1) {
-                error(clientfd, "fail receiving data payload");
+                error(entry->sender_fd, "fail receiving data payload");
                 break;
             }
-            send(clientfd, recv_data_header, HEADER_LENGTH, 0);
-            send(clientfd, recv_data_payload, payload_len, 0);
+            send(entry->receiver_fd, data_header, HEADER_LENGTH, 0);
+            send(entry->receiver_fd, data_payload, payload_len, 0);
             
-            status = recv(clientfd, recv_ack_header, HEADER_LENGTH, 0);
-            if (status == -1 || get_opcode(recv_ack_header) != kOpAck) {
-                error(clientfd, "fail receiving data ack");
+            status = recv(entry->receiver_fd, ack_header, HEADER_LENGTH, 0);
+            if (status == -1 || get_opcode(ack_header) != kOpAck) {
+                error(entry->receiver_fd, "fail receiving data ack");
                 break;
             }
-            send(clientfd, send_ack_header, HEADER_LENGTH, 0);
-        } else if (get_opcode(recv_data_header) == kOpFin) {
-            info(clientfd, "data sending done");
-            break;
-        }
-    }
-    free(recv_data_header);
-    free(recv_data_payload);
-    free(recv_ack_header);
-    return status;
-}
-
-int send_data_ack_handler(long clientfd) {
-    int status = 0;
-    packet_header_t recv_ack_header = malloc(HEADER_LENGTH);
-    while (1) {
-        status = recv(clientfd, recv_ack_header, HEADER_LENGTH, 0);
-        if (status == -1) {
-            error(clientfd, "fail receiving ack header");
-            break;
-        }
-        opcode_t recv_opcode = get_opcode(recv_ack_header);
-        if (recv_opcode == kOpAck || recv_opcode == kOpFin) {
-            send(clientfd, recv_ack_header, HEADER_LENGTH, 0);
-            if (recv_opcode == kOpFin)
+            send(entry->sender_fd, ack_header, HEADER_LENGTH, 0);
+        } else if (get_opcode(data_header) == kOpFin) {
+            send(entry->receiver_fd, data_header, HEADER_LENGTH, 0);
+            status = recv(entry->receiver_fd, data_header,
+                          HEADER_LENGTH, 0);
+            if (status == -1) {
+                error(entry->sender_fd, "fail receiving fin header");
                 break;
-        } else {
-            error(clientfd, "header opcode not ack, %d", recv_opcode);
+            }
+            send(entry->sender_fd, data_header, HEADER_LENGTH, 0);
+            info(entry->sender_fd, "data sending done");
             break;
         }
     }
-    free(recv_ack_header);
+    free(data_header);
+    free(data_payload);
+    free(ack_header);
     return status;
 }
 
@@ -328,11 +312,22 @@ static void *serve(void *argp)
         }
                 
         // send data from sender
-        status = send_data_handler(clientfd);
+        status = send_data_handler(working_entry);
         if (status == -1) {
             error(clientfd, "handle data sending failed");
             return 0;
         }
+        
+        pthread_mutex_lock(&mutex);
+        int code = working_entry->code;
+        close(working_entry->sender_fd);
+        close(working_entry->receiver_fd);
+        free(working_entry->name);
+        free(working_entry->pub_key);
+        free(working_entry);
+        service_table[code % TABLE_SIZE] = NULL;
+        occupy_count--;
+        pthread_mutex_unlock(&mutex);
     } else if (get_opcode(recv_header) == kOpRequest) {  // receiver request
         service_entry_t *working_entry;
         status = receiver_request_handler(&working_entry, clientfd);
@@ -340,28 +335,11 @@ static void *serve(void *argp)
             error(clientfd, "handle receive intention failed");
             return 0;
         }
-
-        // receive data and ack
-        status = send_data_ack_handler(clientfd);
-        if (status == -1) {
-            error(clientfd, "handle ack sending failed");
-            return 0;
-        }
-
-        pthread_mutex_lock(&mutex);
-        int code = working_entry->code;
-        free(working_entry->name);
-        free(working_entry->pub_key);
-        free(working_entry);
-        service_table[code % TABLE_SIZE] = NULL;
-        occupy_count--;
-        pthread_mutex_unlock(&mutex);
     } else {  // invalid situation
         error(clientfd, "invalid header opcode", get_opcode(recv_header));
         return 0;
     }
     free(recv_header);
-    close(clientfd);
     return 0;
 }
 
