@@ -13,8 +13,8 @@
 #include "packet.h"
 #include "util.h"
 
-const int kCodeLength = 6;
 #define TABLE_SIZE  256
+#define CODE_LENGTH 6
 static pthread_mutex_t mutex;
 
 typedef enum service_status {
@@ -33,7 +33,7 @@ struct service_entry {
     service_status_t status;
 };
 
-int has_vacancy;
+int occupy_count = 0;
 service_entry_t *service_table[TABLE_SIZE];
 
 static int gen_code(int code_length) {
@@ -42,13 +42,13 @@ static int gen_code(int code_length) {
 }
 
 static service_entry_t *create_table_entry(int clientfd, int code_length, 
-                                     char *name, int name_length) {
+                                           char *name, int name_length) {
     int code;
     int position;
     do {
-        code = gen_code(kCodeLength);
+        code = gen_code(CODE_LENGTH);
         position = code % TABLE_SIZE;
-    } while(service_table[position] != NULL);
+    } while (service_table[position] != NULL);
     
     service_entry_t *new_entry = malloc(sizeof(service_entry_t));
     new_entry->code = code;
@@ -59,6 +59,7 @@ static service_entry_t *create_table_entry(int clientfd, int code_length,
     new_entry->pub_key = NULL;
 
     service_table[position] = new_entry; 
+    occupy_count++;
     return new_entry;
 }
 
@@ -81,30 +82,42 @@ static int send_intention_handler(service_entry_t **entry,
         goto SEND_INTENTION_RET;
     }
     info(clientfd, "name payload received - %s", name);
+    free(recv_name_payload);
     
+    if (occupy_count == TABLE_SIZE) {
+        warning(clientfd, "no vacancy, try again later");
+        packet_header_t send_ack_header;
+        create_header(&send_ack_header, kOpError, kNone, 0);
+        send(clientfd, send_ack_header, HEADER_LENGTH, 0);
+        free(send_ack_header);
+        goto SEND_INTENTION_RET;
+    }
+
+    // create entry
     pthread_mutex_lock(&mutex);
-    *entry = create_table_entry(clientfd, kCodeLength, name, name_length);
+    *entry = create_table_entry(clientfd, CODE_LENGTH, name, name_length);
     pthread_mutex_unlock(&mutex);
     info(clientfd, "entry creation complete, code = %d", (*entry)->code);
     free(recv_name_payload);
     
     // send code header
     info(clientfd, "sending ack header");
-    packet_header_t send_header;
-    create_header(&send_header, kOpAck, kCode, sizeof(const int));
-    send(clientfd, send_header, HEADER_LENGTH, 0);
+    packet_header_t send_ack_header;
+    create_header(&send_ack_header, kOpAck, kCode, sizeof(const int));
+    send(clientfd, send_ack_header, HEADER_LENGTH, 0);
+    free(send_ack_header);
     
     // send code payload
     info(clientfd, "sending code payload");
     packet_payload_t send_code_payload;
-    status = create_payload(&send_code_payload, 0, sizeof(const int),
+    int payload_size = create_payload(&send_code_payload, 0, sizeof(const int),
                             (char *)&(*entry)->code);
-    if (status == -1) {
+    if ((status = payload_size) == -1) {
         error(clientfd, "fail creating code payload");
         goto SEND_INTENTION_RET;
     }
-    send(clientfd, send_code_payload, 
-         GET_PAYLOAD_PACKET_LEN(sizeof(const int)), 0);
+    send(clientfd, send_code_payload, payload_size, 0);
+    free(send_code_payload);
 SEND_INTENTION_RET:
     return status;
 }
@@ -117,6 +130,7 @@ static int send_pub_key_handler(long clientfd, service_entry_t *entry) {
         return -1;
     }
     send(clientfd, send_pub_key_header, HEADER_LENGTH, 0);
+    free(send_pub_key_header);
 
     packet_payload_t send_pub_key_payload;
     int packet_length = create_payload(&send_pub_key_payload, 0, 
@@ -335,13 +349,19 @@ static void *serve(void *argp)
             return 0;
         }
 
+        pthread_mutex_lock(&mutex);
         int code = working_entry->code;
+        free(working_entry->name);
+        free(working_entry->pub_key);
         free(working_entry);
         service_table[code % TABLE_SIZE] = NULL;
+        occupy_count--;
+        pthread_mutex_unlock(&mutex);
     } else {  // invalid situation
         error(clientfd, "invalid header opcode", get_opcode(recv_header));
         return 0;
     }
+    free(recv_header);
     close(clientfd);
     return 0;
 }
