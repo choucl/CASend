@@ -190,7 +190,7 @@ static int receiver_request_handler(service_entry_t **entry, long clientfd) {
     if (*entry) {  // entry found
         (*entry)->pub_key = pub_key;
         (*entry)->receiver_fd = clientfd;
-        status = create_header(&send_ack_header, kOpAck, kNone, 0);
+        status = create_header(&send_ack_header, kOpAck, kData, 0);
         if (status == -1) {
             error(clientfd, "fail creating ack header");
             goto REQ_ERR_RET1;
