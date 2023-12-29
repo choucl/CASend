@@ -12,16 +12,13 @@ void prefixprintf(char *prefix, int fd, const char *format, ...);
 
 #define error(fd, ...) \
     do { \
-        char *level = getenv("VERBOSE"); \
-        if (level != NULL && level[0] - '0' > 0) { \
-            prefixprintf("error:", fd, __VA_ARGS__); \
-        } \
+        prefixprintf("error:", fd, __VA_ARGS__); \
     } while (0);
 
 #define warning(fd, ...) \
     do { \
         char *level = getenv("VERBOSE"); \
-        if (level != NULL && level[0] - '0' > 1) { \
+        if (level != NULL && level[0] - '0' > 0) { \
             prefixprintf("warning:", fd, __VA_ARGS__); \
         } \
     } while (0);
@@ -29,7 +26,7 @@ void prefixprintf(char *prefix, int fd, const char *format, ...);
 #define info(fd, ...) \
     do { \
         char *level = getenv("VERBOSE"); \
-        if (level != NULL && level[0] - '0' > 2) { \
+        if (level != NULL && level[0] - '0' > 1) { \
             prefixprintf("info:", fd, __VA_ARGS__); \
         } \
     } while (0);
@@ -37,7 +34,7 @@ void prefixprintf(char *prefix, int fd, const char *format, ...);
 #define prompt(fd, ...) \
     do { \
         char *level = getenv("VERBOSE"); \
-        if (level != NULL && level[0] - '0' > 3) { \
+        if (level != NULL && level[0] - '0' > 2) { \
             prefixprintf("::", fd, __VA_ARGS__); \
         } \
     } while (0);
