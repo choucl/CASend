@@ -1,5 +1,6 @@
 #ifndef _UTIL_H
 #define _UTIL_H
+#include <stdlib.h>
 
 void prefixprintf(char *prefix, int fd, const char *format, ...);
 
@@ -7,18 +8,38 @@ void prefixprintf(char *prefix, int fd, const char *format, ...);
     do { \
         prefixprintf("fatal:", fd, __VA_ARGS__); \
         exit(-1); \
-    } while(0)
+    } while (0);
 
 #define error(fd, ...) \
-    prefixprintf("error:", fd, __VA_ARGS__); \
+    do { \
+        char *level = getenv("VERBOSE"); \
+        if (level != NULL && level[0] - '0' > 0) { \
+            prefixprintf("error:", fd, __VA_ARGS__); \
+        } \
+    } while (0);
 
 #define warning(fd, ...) \
-    prefixprintf("warning:", fd, __VA_ARGS__); \
+    do { \
+        char *level = getenv("VERBOSE"); \
+        if (level != NULL && level[0] - '0' > 1) { \
+            prefixprintf("warning:", fd, __VA_ARGS__); \
+        } \
+    } while (0);
     
 #define info(fd, ...) \
-    prefixprintf("info:", fd, __VA_ARGS__); \
+    do { \
+        char *level = getenv("VERBOSE"); \
+        if (level != NULL && level[0] - '0' > 2) { \
+            prefixprintf("info:", fd, __VA_ARGS__); \
+        } \
+    } while (0);
     
 #define prompt(fd, ...) \
-    prefixprintf("::", fd, __VA_ARGS__); \
+    do { \
+        char *level = getenv("VERBOSE"); \
+        if (level != NULL && level[0] - '0' > 3) { \
+            prefixprintf("::", fd, __VA_ARGS__); \
+        } \
+    } while (0);
 
 #endif // _UTIL_H
