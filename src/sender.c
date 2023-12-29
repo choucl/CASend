@@ -129,7 +129,7 @@ int main(int argc, char *argv[])
     // 8. Sender send data
     //  First data
     //  Send header
-    size_t data_size = 8;
+    size_t data_size = 128;
     create_header(&sender_header, kOpData, kData, data_size);
     status = send(client_fd, sender_header, HEADER_LENGTH, 0);
     if (status == -1)
@@ -139,15 +139,18 @@ int main(int argc, char *argv[])
     //  Send data
 
     char *data = malloc(data_size * sizeof(char));
-    data = "aaaaaaaa";
-    create_payload(&sender_payload, 0, data_size, data);
-    status = send(client_fd, &sender_payload, GET_PAYLOAD_PACKET_LEN(data_size), 0);
+    for (size_t i = 0; i < data_size; i++)
+        data[i] = 'a';
+    int payload_size = create_payload(&sender_payload, 0, data_size, data);
+    char *data_copy;
+    copy_payload(sender_payload, &data_copy);
+    printf("payload with size %d: %s\n", payload_size, data_copy);
+    status = send(client_fd, sender_payload, GET_PAYLOAD_PACKET_LEN(data_size), 0);
     if (status == -1)
         printf("Sender send data 0 failed\n");
     else {
-        char *data_copy;
-        copy_payload(sender_payload, &data_copy);
-        printf("Sender send data 0 success: %s\n", data_copy);
+
+        printf("Sender send data 0 success\n");
     }
     //  Recv ack
     sender_header = malloc(HEADER_LENGTH);
@@ -165,9 +168,12 @@ int main(int argc, char *argv[])
     else
         printf("Sender send data 1 header success\n");
     //  Send data
-    data = "bbbbbbbb";
-    create_payload(&sender_payload, 0, data_size, data);
-    status = send(client_fd, &sender_payload, GET_PAYLOAD_PACKET_LEN(data_size), 0);
+    for (size_t i = 0; i < data_size; i++)
+        data[i] = 'b';
+    payload_size = create_payload(&sender_payload, 0, data_size, data);
+    copy_payload(sender_payload, &data_copy);
+    printf("payload with size %d: %s\n", payload_size, data_copy);
+    status = send(client_fd, sender_payload, GET_PAYLOAD_PACKET_LEN(data_size), 0);
     if (status == -1)
         printf("Sender send data 1 failed\n");
     else {

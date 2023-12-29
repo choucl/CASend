@@ -96,8 +96,20 @@ int main(int argc, char *argv[])
         printf("Receiver recv ack failed\n");
     else
         printf("Receiver recv ack success\n");
+    // 5. Receiver recv file name
+    char* fname;
+    receiver_payload = malloc(GET_PAYLOAD_PACKET_LEN(1024));
+    status = recv(client_fd, receiver_payload, GET_PAYLOAD_PACKET_LEN(1024), 0);
+    if (status == -1)
+        printf("Receiver recv file name failed\n");
+    else {
+        copy_payload(receiver_payload, &fname);
+        printf("Receiver recv file name success: %s\n", fname);
+    }
 
-    // 5. Receiver recv data
+    // 6. Receiver recv data
+    char* data;
+    int payload_buf_len = GET_PAYLOAD_PACKET_LEN(1024);
     while (1) {
         // Recv header
         receiver_header = malloc(HEADER_LENGTH);
@@ -108,15 +120,13 @@ int main(int argc, char *argv[])
             printf("Receiver recv data header success\n");
 
         if (get_opcode(receiver_header) == kOpFin) {
-            printf("Ends file transfer\n");
+            printf("Receiver recv end\n");
             break;
         } else {
-            printf("Wating for new data...\n");
+            printf("Receiver wait for data\n");
         }
 
         // Recv data
-        char* data;
-        int payload_buf_len = GET_PAYLOAD_PACKET_LEN(1024);
         receiver_payload = malloc(payload_buf_len);
         status = recv(client_fd, receiver_payload, payload_buf_len, 0);
         if (status == -1)
