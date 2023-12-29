@@ -116,9 +116,9 @@ int main(int argc, char *argv[])
 
         // Recv data
         char* data;
-        size_t data_size = get_payload_length(receiver_header);
-        receiver_payload = malloc(GET_PAYLOAD_PACKET_LEN(data_size));
-        status = recv(client_fd, receiver_payload, GET_PAYLOAD_PACKET_LEN(data_size), 0);
+        int payload_buf_len = GET_PAYLOAD_PACKET_LEN(1024);
+        receiver_payload = malloc(payload_buf_len);
+        status = recv(client_fd, receiver_payload, payload_buf_len, 0);
         if (status == -1)
             printf("Receiver recv data failed\n");
         else {
@@ -134,7 +134,6 @@ int main(int argc, char *argv[])
             printf("Receiver send ack success\n");
 
     }
-
 
     return 0;
 

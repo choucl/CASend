@@ -55,16 +55,14 @@ int main(int argc, char *argv[])
     // Test server
     int status = 0;
 
-
     packet_header_t sender_header;
     packet_payload_t sender_payload;
     size_t name_length = 7;
-    char *file_name = malloc(name_length * sizeof(char));
-    file_name = "bar.log";
-    printf("file name is %s\n", file_name);
+    char *fname = malloc(name_length * sizeof(char));
+    fname = "bar.log";
 
     // 1. Sender requests
-    create_header(&sender_header, kOpCreate, kNone, name_length*sizeof(char));
+    create_header(&sender_header, kOpCreate, kNone, name_length);
     status = send(client_fd, sender_header, HEADER_LENGTH, 0);
     if (status == -1)
         printf("Sender request failed\n");
@@ -72,15 +70,17 @@ int main(int argc, char *argv[])
         printf("Sender request success\n");
 
     // 2. Sender send file name
-    create_payload(&sender_payload, 0, name_length, file_name);
+    create_payload(&sender_payload, 0, name_length, fname); //
+    char *fname_copy;
+    copy_payload(sender_payload, &fname_copy);
     status = send(client_fd, sender_payload, GET_PAYLOAD_PACKET_LEN(name_length), 0);
     if (status == -1)
         printf("Sender send file name failed\n");
     else
-        printf("Sender send file name success\n");
+        printf("Sender send file name success: %s\n", fname_copy);
 
     // 3. Sender get acknowledgement
-    sender_header= malloc(HEADER_LENGTH + 1);
+    sender_header= malloc(HEADER_LENGTH);
     status = recv(client_fd, sender_header, HEADER_LENGTH, 0);
     if (status == -1)
         printf("Sender recv ack failed\n");
@@ -129,21 +129,26 @@ int main(int argc, char *argv[])
     // 8. Sender send data
     //  First data
     //  Send header
-    create_header(&sender_header, kOpData, kData, 8);
+    size_t data_size = 8;
+    create_header(&sender_header, kOpData, kData, data_size);
     status = send(client_fd, sender_header, HEADER_LENGTH, 0);
     if (status == -1)
         printf("Sender send data 0 header failed\n");
     else
         printf("Sender send data 0 header success\n");
     //  Send data
-    char *data = malloc(8 * sizeof(char));
-    data = "qwerqwer";
-    create_payload(&sender_payload, 0, 8, data);
-    status = send(client_fd, &sender_payload, GET_PAYLOAD_PACKET_LEN(8), 0);
+
+    char *data = malloc(data_size * sizeof(char));
+    data = "aaaaaaaa";
+    create_payload(&sender_payload, 0, data_size, data);
+    status = send(client_fd, &sender_payload, GET_PAYLOAD_PACKET_LEN(data_size), 0);
     if (status == -1)
         printf("Sender send data 0 failed\n");
-    else
-        printf("Sender send data 0 success\n");
+    else {
+        char *data_copy;
+        copy_payload(sender_payload, &data_copy);
+        printf("Sender send data 0 success: %s\n", data_copy);
+    }
     //  Recv ack
     sender_header = malloc(HEADER_LENGTH);
     status = recv(client_fd, sender_header, HEADER_LENGTH, 0);
@@ -153,20 +158,23 @@ int main(int argc, char *argv[])
         printf("Sender recv ack 0 success\n");
     // Second data
     //  Send header
-    create_header(&sender_header, kOpData, kData, 8);
+    create_header(&sender_header, kOpData, kData, data_size);
     status = send(client_fd, sender_header, HEADER_LENGTH, 0);
     if (status == -1)
         printf("Sender send data 1 header failed\n");
     else
         printf("Sender send data 1 header success\n");
     //  Send data
-    data = "asdfasdf";
-    create_payload(&sender_payload, 0, 8, data);
-    status = send(client_fd, &sender_payload, GET_PAYLOAD_PACKET_LEN(8), 0);
+    data = "bbbbbbbb";
+    create_payload(&sender_payload, 0, data_size, data);
+    status = send(client_fd, &sender_payload, GET_PAYLOAD_PACKET_LEN(data_size), 0);
     if (status == -1)
         printf("Sender send data 1 failed\n");
-    else
-        printf("Sender send data 1 success\n");
+    else {
+        char *data_copy;
+        copy_payload(sender_payload, &data_copy);
+        printf("Sender send data 1 success: %s\n", data_copy);
+    }
     //  Recv ack
     sender_header = malloc(HEADER_LENGTH);
     status = recv(client_fd, sender_header, HEADER_LENGTH, 0);
