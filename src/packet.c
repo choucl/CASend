@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "util.h"
+
 int create_header(packet_header_t *packet_header, opcode_t opcode,
                   payload_type_t payload_type, size_t payload_length) {
   *packet_header = malloc(3 * sizeof(int));
@@ -60,5 +62,15 @@ int copy_payload(packet_payload_t payload, char **dst) {
   *dst = malloc(sizeof(char) * payload_size);
   if (*dst == NULL) return -1;
   memcpy(*dst, &payload[2 * sizeof(int)], payload_size);
+  return 0;
+}
+
+int check_header_op(packet_header_t header, opcode_t expected_opcode) {
+  int receive_opcode = get_opcode(header);
+  if (receive_opcode != expected_opcode) {
+    error(0, "header opcode mismatch, expected: , get: ", receive_opcode,
+          expected_opcode);
+    return -1;
+  }
   return 0;
 }
