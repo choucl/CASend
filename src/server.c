@@ -12,10 +12,9 @@
 
 #include "packet.h"
 #include "sock.h"
+#include "config.h"
 #include "util.h"
 
-#define TABLE_SIZE 256
-#define CODE_LENGTH 6
 static pthread_mutex_t mutex;
 
 typedef enum service_status {
@@ -44,8 +43,7 @@ static int gen_code(int code_length) {
   return rand() % (int)pow(10, code_length);
 }
 
-static service_entry_t *create_table_entry(int clientfd, int code_length,
-                                           char *name, int name_length) {
+static service_entry_t *create_table_entry(int clientfd, int code_length) {
   int code;
   int position;
   do {
@@ -59,8 +57,8 @@ static service_entry_t *create_table_entry(int clientfd, int code_length,
   new_entry->status = kWaitingRecv;
   new_entry->sender_fd = clientfd;
   new_entry->receiver_fd = -1;
-  new_entry->name = name;
-  new_entry->name_length = name_length;
+  new_entry->name = NULL;
+  new_entry->name_length = -1;
   new_entry->pub_key = NULL;
 
   service_table[position] = new_entry;
@@ -68,25 +66,30 @@ static service_entry_t *create_table_entry(int clientfd, int code_length,
   return new_entry;
 }
 
+static int encrypt_code(int code) {
+  // TODO: encrypt function
+  return 0;
+}
+
 static int send_intention_handler(service_entry_t **entry, long clientfd,
                                   int name_length) {
   int status = 0;
-  info(clientfd, "receive send intention");
-  // receive name payload
-  int name_payload_length = GET_PAYLOAD_PACKET_LEN(name_length);
-  packet_payload_t recv_name_payload = malloc(name_payload_length);
-  status = recv(clientfd, recv_name_payload, name_payload_length, 0);
+  info(clientfd, "received send intention");
+  // receive pubkey payload
+  int key_payload_length = GET_PAYLOAD_PACKET_LEN(64);
+  packet_payload_t recv_pubkey_payload = malloc(key_payload_length);
+  status = recv(clientfd, recv_pubkey_payload, key_payload_length, 0);
   if (status == -1) {
-    error(clientfd, "recv name payload.");
+    error(clientfd, "recv sender public key payload failed.");
     goto SEND_INTENTION_RET;
   }
-  char *name;
-  if (copy_payload(recv_name_payload, &name) == -1 || name[0] == 0) {
-    error(clientfd, "parsing name.") goto SEND_INTENTION_RET;
+  char *sender_pubkey;
+  if (copy_payload(recv_pubkey_payload, &sender_pubkey) == -1) {
+    error(clientfd, "parsing sender public key failed");
+    goto SEND_INTENTION_RET;
   }
-  info(clientfd, "name payload received - %s", name);
-  free(recv_name_payload);
-
+  info(clientfd, "received sender public key");
+  
   if (occupy_count == TABLE_SIZE) {
     warning(clientfd, "no vacancy, try again later");
     packet_header_t send_err_header;
@@ -95,12 +98,15 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
     free(send_err_header);
     goto SEND_INTENTION_RET;
   }
-
+  
   // create entry
   pthread_mutex_lock(&mutex);
-  *entry = create_table_entry(clientfd, CODE_LENGTH, name, name_length);
+  *entry = create_table_entry(clientfd, CODE_LENGTH);
   pthread_mutex_unlock(&mutex);
   info(clientfd, "entry creation complete, code = %d", (*entry)->code);
+  
+  // TODO: encrypt code here
+  encrypt_code((*entry)->code);
 
   // send code header
   info(clientfd, "sending ack header");
@@ -118,42 +124,28 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
     error(clientfd, "fail creating code payload");
     goto SEND_INTENTION_RET;
   }
+  
+  // receive name payload
+  int name_payload_length = GET_PAYLOAD_PACKET_LEN(name_length);
+  packet_payload_t recv_name_payload = malloc(name_payload_length);
+  status = recv(clientfd, recv_name_payload, name_payload_length, 0);
+  if (status == -1) {
+    error(clientfd, "recv name payload.");
+    goto SEND_INTENTION_RET;
+  }
+  char *name;
+  if (copy_payload(recv_name_payload, &name) == -1 || name[0] == 0) {
+    error(clientfd, "parsing name.");
+    goto SEND_INTENTION_RET;
+  }
+  info(clientfd, "name payload received - %s", name);
+  (*entry)->name = name;
+  (*entry)->name_length = name_length;
+  free(recv_name_payload);
+
   send(clientfd, send_code_payload, payload_size, 0);
   free(send_code_payload);
 SEND_INTENTION_RET:
-  return status;
-}
-
-static int send_pub_key_handler(long clientfd, service_entry_t *entry) {
-  int status = 0;
-  packet_header_t send_pub_key_header;
-  if (create_header(&send_pub_key_header, kOpPub, kPubKey, 64) == -1) {
-    error(clientfd, "fail creating pub-key header");
-    return -1;
-  }
-  send(clientfd, send_pub_key_header, HEADER_LENGTH, 0);
-  free(send_pub_key_header);
-
-  packet_payload_t send_pub_key_payload;
-  int packet_length =
-      create_payload(&send_pub_key_payload, 0, 64, entry->pub_key);
-  if ((status = packet_length) <= 0) {
-    error(clientfd, "fail creating pub-key payload") return -1;
-  }
-  send(clientfd, send_pub_key_payload, packet_length, 0);
-  free(send_pub_key_payload);
-
-  // wait sender ack
-  packet_payload_t recv_ack_header = malloc(HEADER_LENGTH);
-  status = recv(clientfd, recv_ack_header, HEADER_LENGTH, 0);
-  if (status <= 0) {
-    error(clientfd, "receive ack pubkey ack failed");
-    status = -1;
-  } else if (get_opcode(recv_ack_header) != kOpAck) {
-    error(clientfd, "wrong opcode: %d", get_opcode(recv_ack_header));
-    status = -1;
-  }
-  free(recv_ack_header);
   return status;
 }
 
@@ -167,32 +159,20 @@ static int receiver_request_handler(service_entry_t **entry, long clientfd) {
   status = recv(clientfd, recv_code_payload, code_payload_length, 0);
   if (status <= 0) {
     error(clientfd, "fail receiving code payload");
-    goto REQ_ERR_RET0;
+    goto REQ_ERR_RET;
   }
   int *recv_code;
   copy_payload(recv_code_payload, (char **)&recv_code);
   info(clientfd, "recv code payload = %d", *recv_code);
 
-  // receive public key
-  packet_payload_t recv_pubkey_payload = malloc(GET_PAYLOAD_PACKET_LEN(64));
-  status = recv(clientfd, recv_pubkey_payload, GET_PAYLOAD_PACKET_LEN(64), 0);
-  if (status <= 0) {
-    error(clientfd, "recv code payload");
-    goto REQ_ERR_RET1;
-  }
-  char *pub_key;
-  copy_payload(recv_pubkey_payload, &pub_key);
-  info(clientfd, "recv pub_key payload = %s", pub_key);
-
   *entry = service_table[(*recv_code) % TABLE_SIZE];
   packet_header_t send_ack_header;
   if (*entry) {  // entry found
-    (*entry)->pub_key = pub_key;
     (*entry)->receiver_fd = clientfd;
     status = create_header(&send_ack_header, kOpAck, kData, 0);
     if (status == -1) {
       error(clientfd, "fail creating ack header");
-      goto REQ_ERR_RET1;
+      goto REQ_ERR_RET;
     }
     send(clientfd, send_ack_header, HEADER_LENGTH, 0);
 
@@ -201,7 +181,7 @@ static int receiver_request_handler(service_entry_t **entry, long clientfd) {
                                      (*entry)->name_length, (*entry)->name);
     if ((status = payload_len) <= 0) {
       error(clientfd, "fail creating name payload");
-      goto REQ_ERR_RET1;
+      goto REQ_ERR_RET;
     }
     send(clientfd, send_name_payload, payload_len, 0);
     free(send_name_payload);
@@ -209,70 +189,87 @@ static int receiver_request_handler(service_entry_t **entry, long clientfd) {
     status = create_header(&send_ack_header, kOpError, kNone, 0);
     if (status == -1) {
       error(clientfd, "fail creating ack header");
-      goto REQ_ERR_RET1;
+      goto REQ_ERR_RET;
     }
     send(clientfd, send_ack_header, HEADER_LENGTH, 0);
     error(clientfd, "recv code not found");
     status = -1;
   }
   free(send_ack_header);
-REQ_ERR_RET1:
-  free(recv_pubkey_payload);
-REQ_ERR_RET0:
+REQ_ERR_RET:
   free(recv_code_payload);
   return status;
 }
 
-int send_data_handler(service_entry_t *entry) {
+static int bypass_packet(long sender_fd, long receiver_fd, int has_payload, 
+                         int *transmit_finish) {
   int status = 0;
-  int payload_buf_len = GET_PAYLOAD_PACKET_LEN(1024);
   packet_header_t data_header = malloc(HEADER_LENGTH);
-  packet_payload_t data_payload = malloc(payload_buf_len);
-  packet_header_t ack_header = malloc(HEADER_LENGTH);
   packet_header_t err_header;
-  status = create_header(&err_header, kOpError, kNone, 0);
+  create_header(&err_header, kOpError, kNone, 0);
+  
+  int header_length = recv(sender_fd, data_header, HEADER_LENGTH, 0);
+  if ((status = header_length) <= 0) {
+    error(sender_fd, "fail receiving data header");
+    send(receiver_fd, err_header, HEADER_LENGTH, 0);
+  }
+  send(receiver_fd, data_header, HEADER_LENGTH, 0);
+  if (transmit_finish != NULL) {
+    *transmit_finish = (get_opcode(data_header) == kOpFin);
+  }
+  free(data_header);
+  
+  if (has_payload) {
+    int payload_buf_len = GET_PAYLOAD_PACKET_LEN(MAX_PAYLOAD_LEN);
+    packet_payload_t payload_buffer = malloc(payload_buf_len);
+    int payload_len = recv(sender_fd, payload_buffer, payload_buf_len, 0);
+    if ((status = payload_len) <= 0) {
+      error(sender_fd, "fail receiving data payload");
+      send(receiver_fd, err_header, HEADER_LENGTH, 0);
+    }
+    status = send(receiver_fd, payload_buffer, payload_len, 0);
+    free(payload_buffer);
+  }
+  free(err_header);
+  return status;
+}
+
+static int pubkey_transmission_handler(service_entry_t *entry) {
+  int status;
+  // pubkey
+  status = bypass_packet(entry->receiver_fd, entry->sender_fd, 1, NULL);
+  if (status <= 0) {
+    error(entry->receiver_fd, "receiver send public key failed");
+  }
+  // ack
+  status = bypass_packet(entry->sender_fd, entry->receiver_fd, 0, NULL);
+  if (status <= 0) {
+    error(entry->sender_fd, "sender ack public key failed");
+  }
+  return status;
+}
+
+int data_transmission_handler(service_entry_t *entry) {
+  int status = 0;
+  int is_finish = 0;
   while (1) {
-    status = recv(entry->sender_fd, data_header, HEADER_LENGTH, 0);
+    // data
+    status = bypass_packet(entry->sender_fd, entry->receiver_fd, 1, &is_finish);
     if (status <= 0) {
-      error(entry->sender_fd, "fail receiving data header");
-      send(entry->receiver_fd, err_header, HEADER_LENGTH, 0);
+      error(entry->sender_fd, "data transmission failed");
       break;
     }
-    if (get_opcode(data_header) == kOpData) {
-      int payload_len =
-          recv(entry->sender_fd, data_payload, payload_buf_len, 0);
-      if ((status = payload_len) <= 0) {
-        error(entry->sender_fd, "fail receiving data payload");
-        send(entry->receiver_fd, err_header, HEADER_LENGTH, 0);
-        break;
-      }
-      send(entry->receiver_fd, data_header, HEADER_LENGTH, 0);
-      send(entry->receiver_fd, data_payload, payload_len, 0);
-
-      status = recv(entry->receiver_fd, ack_header, HEADER_LENGTH, 0);
-      if (status <= 0 || get_opcode(ack_header) != kOpAck) {
-        error(entry->receiver_fd, "fail receiving data ack");
-        send(entry->sender_fd, err_header, HEADER_LENGTH, 0);
-        break;
-      }
-      send(entry->sender_fd, ack_header, HEADER_LENGTH, 0);
-    } else if (get_opcode(data_header) == kOpFin) {
-      send(entry->receiver_fd, data_header, HEADER_LENGTH, 0);
-      status = recv(entry->receiver_fd, data_header, HEADER_LENGTH, 0);
-      if (status <= 0) {
-        error(entry->receiver_fd, "fail receiving fin header");
-        send(entry->sender_fd, err_header, HEADER_LENGTH, 0);
-        break;
-      }
-      send(entry->sender_fd, data_header, HEADER_LENGTH, 0);
-      info(entry->sender_fd, "data sending done");
+    // ack
+    status = bypass_packet(entry->receiver_fd, entry->sender_fd, 0, NULL);
+    if (status <= 0) {
+      error(entry->receiver_fd, "ack transmission failed");
+      break;
+    }
+    if (is_finish) {
+      info(entry->sender_fd, "data transmission finished");
       break;
     }
   }
-  free(data_header);
-  free(data_payload);
-  free(ack_header);
-  free(err_header);
   return status;
 }
 
@@ -303,16 +300,14 @@ static void *serve(void *argp) {
     }
 
     // wait until receiver public key delivered
-    while (working_entry->pub_key == NULL)
-      ;
-    status = send_pub_key_handler(clientfd, working_entry);
+    status = pubkey_transmission_handler(working_entry);
     if (status == -1) {
       error(clientfd, "handle pubkey intention failed");
       goto FINISH_SERVING;
     }
 
     // send data from sender
-    status = send_data_handler(working_entry);
+    status = data_transmission_handler(working_entry);
     if (status == -1) {
       error(clientfd, "handle data sending failed");
       goto FINISH_SERVING;
