@@ -5,8 +5,10 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <assert.h>
 #include "sock.h"
 #include "packet.h"
+#include "util.h"
 
 int request(int receiver_fd, packet_header_t *header,
             packet_payload_t *payload, char *input_code);
@@ -93,24 +95,24 @@ int request(int receiver_fd, packet_header_t *header,
     create_header(header, kOpRequest, kNone, sizeof(const int));
     status = send(receiver_fd, *header, HEADER_LENGTH, 0);
     if (status == -1) {
-        printf("Receiver request failed\n");
+        error(receiver_fd, "Receiver request failed");
         return status;
     } else
-        printf("Receiver request success\n");
+        info(receiver_fd, "Receiver request success");
 
     // Receiver send code
     int *code = malloc(sizeof(int));
     *code = atoi(input_code);
-    printf("Your input code is %d\n", *code);
+    info(receiver_fd, "Your input code is %d", *code);
 
     create_payload(payload, 0, GET_PAYLOAD_PACKET_LEN(sizeof(int)), (char*)code);
     status = send(receiver_fd, *payload, GET_PAYLOAD_PACKET_LEN(sizeof(int)), 0);
     if (status == -1) {
-        printf("Receiver send code failed\n");
+        error(receiver_fd, "Receiver send code failed");
         return status;
     } else {
         copy_payload(*payload, (char**)&code);
-        printf("Receiver send code success: %d\n", *code);
+        info(receiver_fd, "Receiver send code success: %d", *code);
     }
 
     // Receiver send public key
@@ -120,18 +122,18 @@ int request(int receiver_fd, packet_header_t *header,
     create_payload(payload, 0, 64, pub_key);
     status = send(receiver_fd, *payload, GET_PAYLOAD_PACKET_LEN(64), 0);
     if (status == -1) {
-        printf("Receiver send public key failed\n");
+        error(receiver_fd, "Receiver send public key failed");
         return status;
     } else
-        printf("Receiver send public key success\n");
+        info(receiver_fd, "Receiver send public key success");
     // Receiver receive ack
     *header = malloc(HEADER_LENGTH);
     status = recv(receiver_fd, *header, HEADER_LENGTH, 0);
-    if (status == -1)
-        printf("Receiver recv ack failed\n");
-    else
-        printf("Receiver recv ack success\n");
-
+    if (status == -1) {
+        error(receiver_fd, "Receiver recv ack failed");
+    } else {
+        info(receiver_fd, "Receiver recv ack success");
+    }
     return status;
 }
 
@@ -146,24 +148,24 @@ int receive_data(int receiver_fd, packet_header_t *header,
     *payload = malloc(GET_PAYLOAD_PACKET_LEN(1024));
     status = recv(receiver_fd, *payload, GET_PAYLOAD_PACKET_LEN(1024), 0);
     if (status == -1) {
-        printf("Receiver recv file name failed\n");
+        error(receiver_fd, "Receiver recv file name failed");
         return status;
     } else {
         copy_payload(*payload, &fname);
-        printf("Receiver recv file name success: %s\n", fname);
+        info(receiver_fd, "Receiver recv file name success: %s", fname);
     }
 
     FILE *dst_file;
     dst_file = fopen(fname, "wb");
     if (dst_file == NULL) {
-        printf("Error opening destination file\n");
+        error(receiver_fd, "Error opening destination file");
         return 1;
     } else {
-        printf("Open file %s successfully\n", fname);
+        info(receiver_fd, "Open file %s successfully", fname);
     }
 
     // Receive data
-    char* data;
+
     int payload_buf_len = GET_PAYLOAD_PACKET_LEN(1024);
 
     while (1) {
@@ -171,50 +173,57 @@ int receive_data(int receiver_fd, packet_header_t *header,
         *header = malloc(HEADER_LENGTH);
         status = recv(receiver_fd, *header, HEADER_LENGTH, 0);
         if (status == -1) {
-            printf("Receiver recv data header failed\n");
+            error(receiver_fd, "Receiver recv data header failed");
             return status;
         } else
-            printf("Receiver recv data header success\n");
+            info(receiver_fd, "Receiver recv data header success");
 
         if (get_opcode(*header) == kOpFin) {
-            printf("Receiver recv end\n");
+            info(receiver_fd, "Receiver recv end");
             break;
         } else {
-            printf("Receiver wait for data\n");
+            info(receiver_fd, "Receiver wait for data");
         }
 
+        int payload_length = get_payload_length(*header);
+        payload_buf_len = GET_PAYLOAD_PACKET_LEN(payload_length);
+
         // Receive data
+        char* data;
         *payload = malloc(payload_buf_len);
         status = recv(receiver_fd, *payload, payload_buf_len, 0);
         if (status == -1) {
-            printf("Receiver recv data failed\n");
+            error(receiver_fd, "Receiver recv data failed");
             return status;
         } else {
             copy_payload(*payload, &data);
-            printf("Receiver recv data success: %s", data);
+            //info(receiver_fd, "Receiver recv data success: %s", data);
         }
 
         // Write data to file
-        fwrite(data, 1024, 1, dst_file);
+        if (!data) info(receiver_fd, "FFFFFFFFFFFFFFFFFFFFFFFFFF\n");
+
+        fwrite(data, sizeof(char), payload_length, dst_file);
+        free(data);
 
         // Send ack
         create_header(header, kOpAck, kNone, 0);
         status = send(receiver_fd, *header, HEADER_LENGTH, 0);
         if (status == -1) {
-            printf("Receiver send ack failed\n");
+            error(receiver_fd, "Receiver send ack failed");
             return status;
         } else
-            printf("Receiver send ack success\n");
+            info(receiver_fd, "Receiver send ack success");
 
     }
 
     fclose(dst_file);
     create_header(header, kOpFin, kNone, 0);
     status = send(receiver_fd, *header, HEADER_LENGTH, 0);
-    if (status == -1)
-        printf("Receiver finish failed\n");
-    else
-        printf("Receiver finish success\n");
-
+    if (status == -1) {
+        error(receiver_fd, "Receiver finish failed");
+    } else {
+        info(receiver_fd, "Receiver finish success");
+    }
     return status;
 }

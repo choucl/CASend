@@ -7,6 +7,7 @@
 #include <netinet/in.h>
 #include "sock.h"
 #include "packet.h"
+#include "util.h"
 
 int send_intention(int sender_fd, packet_header_t *header,
                             packet_payload_t *payload, char *fname);
@@ -85,7 +86,7 @@ int main(int argc, char *argv[])
 
     if (status == -1) return status;
 
-    printf("Get public key: %s\n", pub_key);
+    info(sender_fd, "Get public key: %s", pub_key);
 
     send_data(sender_fd, &sender_header, &sender_payload, fname, pub_key);
 
@@ -104,10 +105,10 @@ int send_intention(int sender_fd, packet_header_t *header,
     create_header(header, kOpCreate, kNone, name_length);
     status = send(sender_fd, *header, HEADER_LENGTH, 0);
     if (status == -1) {
-        printf("Sender request failed\n");
+        error(sender_fd, "Sender request failed");
         return status;
     } else
-        printf("Sender request success\n");
+        info(sender_fd, "Sender request success");
 
     // Sender send file name
     create_payload(payload, 0, name_length, fname); //
@@ -115,29 +116,29 @@ int send_intention(int sender_fd, packet_header_t *header,
     copy_payload(*payload, &fname_copy);
     status = send(sender_fd, *payload, GET_PAYLOAD_PACKET_LEN(name_length), 0);
     if (status == -1) {
-        printf("Sender send file name failed\n");
+        error(sender_fd, "Sender send file name failed");
         return status;
     } else
-        printf("Sender send file name success: %s\n", fname_copy);
+        info(sender_fd, "Sender send file name success: %s", fname_copy);
 
     // Sender get acknowledgement
     *header = malloc(HEADER_LENGTH);
     status = recv(sender_fd, *header, HEADER_LENGTH, 0);
     if (status == -1) {
-        printf("Sender recv ack failed\n");
+        error(sender_fd, "Sender recv ack failed");
         return status;
     } else
-        printf("Sender recv ack success\n");
+        info(sender_fd, "Sender recv ack success");
 
     // Sender get code
     int* code;
     *payload = malloc(GET_PAYLOAD_PACKET_LEN(sizeof(const int)));
     status = recv(sender_fd, *payload, GET_PAYLOAD_PACKET_LEN(sizeof(const int)), 0);
-    if (status == -1)
-        printf("Sender recv code failed\n");
-    else {
+    if (status == -1) {
+        error(sender_fd, "Sender recv code failed");
+    } else {
         copy_payload(*payload, (char**)&code);
-        printf("Sender recv code success: %d\n", *code);
+        info(sender_fd, "Sender recv code success: %d", *code);
     }
 
     return status;
@@ -151,31 +152,31 @@ int receive_pub_key(int sender_fd, packet_header_t *header,
     *header = malloc(HEADER_LENGTH);
     status = recv(sender_fd, *header, HEADER_LENGTH, 0);
     if (status == -1) {
-        printf("Sender recv public key header failed\n");
+        error(sender_fd, "Sender recv public key header failed");
         return status;
     } else {
-        printf("Sender recv public key header success\n");
+        info(sender_fd, "Sender recv public key header success");
     }
 
     // Sender recv public key
     *payload = malloc(GET_PAYLOAD_PACKET_LEN(64));
     status = recv(sender_fd, *payload, GET_PAYLOAD_PACKET_LEN(64), 0);
     if (status == -1) {
-        printf("Sender recv public key failed\n");
+        error(sender_fd, "Sender recv public key failed");
         return status;
     } else {
         copy_payload(*payload, pub_key);
-        printf("Sender recv public key success: %s\n", *pub_key);
+        info(sender_fd, "Sender recv public key success: %s", *pub_key);
     }
 
     // Sender ack public key
     create_header(header, kOpAck, kPubKey, 0);
     status = send(sender_fd, *header, HEADER_LENGTH, 0);
-    if (status == -1)
-        printf("Sender ack public key failed\n");
-    else
-        printf("Sender ack public key success\n");
-
+    if (status == -1) {
+        error(sender_fd, "Sender ack public key failed");
+    } else {
+        info(sender_fd, "Sender ack public key success");
+    }
     return status;
 }
 
@@ -186,47 +187,59 @@ int send_data(int sender_fd, packet_header_t *header,
     src_file = fopen(fname, "rb");
 
     if (src_file == NULL) {
-        printf("Error opening source file\n");
+        error(sender_fd, "Error opening source file");
         return 1;
     } else {
-        printf("Open file %s successfully\n", fname);
+        info(sender_fd, "Open file %s successfully", fname);
     }
 
-    size_t data_size = 1024;
-    char *data = malloc(data_size * sizeof(char));
+    size_t chunk_size = 1024;
+    char *data_chunk = malloc(chunk_size * sizeof(char));
     int status;
+    int final_chunk = 0;
+    size_t payload_length;
 
     // Read data & send
-    while (fread(data, data_size, 1, src_file)) {
+    while (1) {
+
+        payload_length = fread(data_chunk, sizeof(char), chunk_size, src_file);
+
+        if (payload_length < chunk_size) {
+            chunk_size = payload_length;
+            final_chunk = 1;
+            //info(sender_fd, "Last chunk size %ld", payload_length);
+        } //else {
+            //info(sender_fd, "Chunk size %ld", payload_length);
+        //}
+
         // Send data header
-        create_header(header, kOpData, kData, data_size);
+        create_header(header, kOpData, kData, chunk_size);
         status = send(sender_fd, *header, HEADER_LENGTH, 0);
         if (status == -1) {
-            printf("Sender send data header failed\n");
+            error(sender_fd, "Sender send data header failed");
             return status;
         } else
-            printf("Sender send data header success\n");
+            info(sender_fd, "Sender send data header success");
 
         //  Send data paylaod
-        int payload_size = create_payload(payload, 0, data_size, data);
-        char *data_copy;
-        copy_payload(*payload, &data_copy);
-        printf("payload with size %d: %s", payload_size, data_copy);
-        status = send(sender_fd, *payload, GET_PAYLOAD_PACKET_LEN(data_size), 0);
+        create_payload(payload, 0, chunk_size, data_chunk);
+        status = send(sender_fd, *payload, GET_PAYLOAD_PACKET_LEN(chunk_size), 0);
         if (status == -1) {
-            printf("Sender send data failed\n");
+            error(sender_fd, "Sender send data failed");
             return status;
         } else
-            printf("Sender send data success\n");
+            info(sender_fd, "Sender send data success");
 
         //  Receive ack
         *header = malloc(HEADER_LENGTH);
         status = recv(sender_fd, *header, HEADER_LENGTH, 0);
         if (status == -1) {
-            printf("Sender recv ack failed\n");
+            error(sender_fd, "Sender recv ack failed");
             return status;
         } else
-            printf("Sender recv ack success\n");
+            info(sender_fd, "Sender recv ack success");
+
+        if (final_chunk) break;
     }
 
     // End of data transfer
@@ -236,18 +249,18 @@ int send_data(int sender_fd, packet_header_t *header,
     create_header(header, kOpFin, kNone, 0);
     status = send(sender_fd, *header, HEADER_LENGTH, 0);
     if (status == -1) {
-        printf("Sender end sending failed\n");
+        error(sender_fd, "Sender end sending failed");
         return status;
     } else
-        printf("Sender end sending success\n");
+        info(sender_fd, "Sender end sending success");
 
     // Receive finish ack
     *header = malloc(HEADER_LENGTH);
     status = recv(sender_fd, *header, HEADER_LENGTH, 0);
-    if (status == -1)
-        printf("Sender finish failed\n");
-    else
-        printf("Sender finish success\n");
-
+    if (status == -1) {
+        error(sender_fd, "Sender finish failed");
+    } else {
+        info(sender_fd, "Sender finish success");
+    }
     return status;
 }
