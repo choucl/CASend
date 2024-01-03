@@ -1,9 +1,10 @@
 #include "packet.h"
-#include "util.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "util.h"
 
 int create_header(packet_header_t *packet_header, opcode_t opcode,
                   payload_type_t payload_type, size_t payload_length) {
@@ -67,7 +68,7 @@ int copy_payload(packet_payload_t payload, char **dst) {
 int check_header_op(packet_header_t header, opcode_t expected_opcode) {
   int receive_opcode = get_opcode(header);
   if (receive_opcode != expected_opcode) {
-    error(0, "header opcode mismatch, expected: , get: ", receive_opcode, 
+    error(0, "header opcode mismatch, expected: , get: ", receive_opcode,
           expected_opcode);
     return -1;
   }

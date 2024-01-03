@@ -10,9 +10,9 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "config.h"
 #include "packet.h"
 #include "sock.h"
-#include "config.h"
 #include "util.h"
 
 static pthread_mutex_t mutex;
@@ -82,7 +82,7 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
     goto SEND_INTENTION_RET;
   }
   info(clientfd, "received sender public key");
-  
+
   if (occupy_count == TABLE_SIZE) {
     warning(clientfd, "no vacancy, try again later");
     packet_header_t send_err_header;
@@ -91,13 +91,13 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
     free(send_err_header);
     goto SEND_INTENTION_RET;
   }
-  
+
   // create entry
   pthread_mutex_lock(&mutex);
   *entry = create_table_entry(clientfd, CODE_LENGTH);
   pthread_mutex_unlock(&mutex);
   info(clientfd, "entry creation complete, code = %d", (*entry)->code);
-  
+
   // TODO: encrypt code here
   encrypt_code((*entry)->code);
 
@@ -117,7 +117,7 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
     error(clientfd, "fail creating code payload");
     goto SEND_INTENTION_RET;
   }
-  
+
   // receive name header
   packet_header_t recv_name_header = malloc(HEADER_LENGTH);
   status = recv(clientfd, recv_name_header, HEADER_LENGTH, 0);
@@ -126,7 +126,7 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
     goto SEND_INTENTION_RET;
   }
   free(recv_name_header);
-  
+
   // receive name payload
   int name_payload_length = GET_PAYLOAD_PACKET_LEN(name_length);
   packet_payload_t recv_name_payload = malloc(name_payload_length);
@@ -206,10 +206,10 @@ REQ_ERR_RET:
 static int bypass_packet(service_entry_t *entry, int sender_to_receiver,
                          int has_payload, int *transmit_finish) {
   int status = 0;
-  long send_fd = (sender_to_receiver)? entry->sender_fd : entry->receiver_fd;
-  long recv_fd = (sender_to_receiver)? entry->receiver_fd : entry->sender_fd;
+  long send_fd = (sender_to_receiver) ? entry->sender_fd : entry->receiver_fd;
+  long recv_fd = (sender_to_receiver) ? entry->receiver_fd : entry->sender_fd;
   packet_header_t data_header = entry->header_buffer;
-  
+
   int header_length = recv(send_fd, data_header, HEADER_LENGTH, 0);
   if ((status = header_length) <= 0) {
     error(send_fd, "fail receiving data header");
@@ -219,7 +219,7 @@ static int bypass_packet(service_entry_t *entry, int sender_to_receiver,
   if (transmit_finish != NULL) {
     *transmit_finish = (get_opcode(data_header) == kOpFin);
   }
-  
+
   if (has_payload) {
     int payload_buf_len = GET_PAYLOAD_PACKET_LEN(MAX_PAYLOAD_LEN);
     packet_payload_t payload_buffer = entry->payload_buffer;
