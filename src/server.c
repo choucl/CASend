@@ -123,6 +123,15 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
     goto SEND_INTENTION_RET;
   }
   
+  // receive name header
+  packet_header_t recv_name_header = malloc(HEADER_LENGTH);
+  status = recv(clientfd, recv_name_header, HEADER_LENGTH, 0);
+  if (status == -1) {
+    error(clientfd, "recv name header failed");
+    goto SEND_INTENTION_RET;
+  }
+  free(recv_name_header);
+  
   // receive name payload
   int name_payload_length = GET_PAYLOAD_PACKET_LEN(name_length);
   packet_payload_t recv_name_payload = malloc(name_payload_length);
