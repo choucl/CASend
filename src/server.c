@@ -31,7 +31,6 @@ struct service_entry {
   long sender_fd;
   long receiver_fd;
   char *name;
-  char *pub_key;
   service_status_t status;
 };
 
@@ -59,7 +58,6 @@ static service_entry_t *create_table_entry(int clientfd, int code_length) {
   new_entry->receiver_fd = -1;
   new_entry->name = NULL;
   new_entry->name_length = -1;
-  new_entry->pub_key = NULL;
 
   service_table[position] = new_entry;
   occupy_count++;
@@ -320,7 +318,6 @@ static void *serve(void *argp) {
       if (working_entry->sender_fd > 0) close(working_entry->sender_fd);
       if (working_entry->receiver_fd > 0) close(working_entry->receiver_fd);
       free(working_entry->name);
-      free(working_entry->pub_key);
       free(working_entry);
       service_table[code % TABLE_SIZE] = NULL;
       occupy_count--;
