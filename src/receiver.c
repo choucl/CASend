@@ -216,6 +216,9 @@ int receive_data(int receiver_fd, char sha256_str[65])
 
         SHA256_Update(&sha256, data_seg, seg_len);
 
+        // Write data to file
+        if (!data_seg) info(receiver_fd, "FFFFFFFFFFFFFFFFFFFFFFFFFF\n");
+
         fwrite(data_seg, sizeof(char), seg_len, dst_file);
         free(data_seg);
 
