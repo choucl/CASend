@@ -54,4 +54,10 @@ size_t get_cur_payload_size(packet_payload_t payload);
 //   0 : correct
 int copy_payload(packet_payload_t payload, char **dst);
 
+// check header opcode match or not
+// return value:
+//   -1: mismatch
+//   0: match
+int check_header_op(packet_header_t header, opcode_t expected_opcode);
+
 #endif  // _PACKET_H
