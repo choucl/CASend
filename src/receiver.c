@@ -5,16 +5,15 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <openssl/sha.h>
 #include <assert.h>
 #include "sock.h"
 #include "packet.h"
 #include "util.h"
 
-int request(int receiver_fd, packet_header_t *header,
-            packet_payload_t *payload, char *input_code);
+int request(int receiver_fd, char *input_code);
 
-int receive_data(int receiver_fd, packet_header_t *header,
-            packet_payload_t *payload);
+int receive_data(int receiver_fd, char sha256_str[65]);
 
 int main(int argc, char *argv[])
 {
@@ -71,14 +70,14 @@ int main(int argc, char *argv[])
     // Main process
     int status = 0;
 
-    packet_header_t receiver_header;
-    packet_payload_t receiver_payload;
-
-    status = request(receiver_fd, &receiver_header, &receiver_payload, input_code);
+    status = request(receiver_fd, input_code);
 
     if (status == -1) return status;
 
-    status = receive_data(receiver_fd, &receiver_header, &receiver_payload);
+    char sha256_str[65];
+    status = receive_data(receiver_fd, sha256_str);
+
+    info(receiver_fd, "sha256: %s", sha256_str);
 
     if (status == -1) return status;
 
@@ -86,73 +85,82 @@ int main(int argc, char *argv[])
 
 }
 
-int request(int receiver_fd, packet_header_t *header,
-            packet_payload_t *payload, char *input_code)
+int request(int receiver_fd, char *input_code)
 {
+
+    packet_header_t header;
+    packet_payload_t payload;
     int status = 0;
 
-    // Receiver request
-    create_header(header, kOpRequest, kNone, sizeof(const int));
-    status = send(receiver_fd, *header, HEADER_LENGTH, 0);
+    // request
+    create_header(&header, kOpRequest, kNone, sizeof(const int));
+    status = send(receiver_fd, header, HEADER_LENGTH, 0);
+    free(header);
     if (status == -1) {
-        error(receiver_fd, "Receiver request failed");
+        error(receiver_fd, "request failed");
         return status;
     } else
-        info(receiver_fd, "Receiver request success");
+        info(receiver_fd, "request success");
 
-    // Receiver send code
+    // send code
     int *code = malloc(sizeof(int));
     *code = atoi(input_code);
-    info(receiver_fd, "Your input code is %d", *code);
+    info(receiver_fd, "input code is %d", *code);
 
-    create_payload(payload, 0, GET_PAYLOAD_PACKET_LEN(sizeof(int)), (char*)code);
-    status = send(receiver_fd, *payload, GET_PAYLOAD_PACKET_LEN(sizeof(int)), 0);
+    create_payload(&payload, 0, GET_PAYLOAD_PACKET_LEN(sizeof(int)), (char*)code);
+    status = send(receiver_fd, payload, GET_PAYLOAD_PACKET_LEN(sizeof(int)), 0);
+    copy_payload(payload, (char**)&code);
+    free(payload);
     if (status == -1) {
-        error(receiver_fd, "Receiver send code failed");
+        error(receiver_fd, "send code failed");
         return status;
     } else {
-        copy_payload(*payload, (char**)&code);
-        info(receiver_fd, "Receiver send code success: %d", *code);
+        info(receiver_fd, "send code success: %d", *code);
     }
 
-    // Receiver send public key
+    // receive ack
+    // send public key
     char *pub_key = malloc(64 * sizeof(char));
     pub_key =
         "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd";
-    create_payload(payload, 0, 64, pub_key);
-    status = send(receiver_fd, *payload, GET_PAYLOAD_PACKET_LEN(64), 0);
+    create_payload(&payload, 0, 64, pub_key);
+    status = send(receiver_fd, payload, GET_PAYLOAD_PACKET_LEN(64), 0);
+    free(payload);
     if (status == -1) {
-        error(receiver_fd, "Receiver send public key failed");
+        error(receiver_fd, "send public key failed");
         return status;
-    } else
-        info(receiver_fd, "Receiver send public key success");
-    // Receiver receive ack
-    *header = malloc(HEADER_LENGTH);
-    status = recv(receiver_fd, *header, HEADER_LENGTH, 0);
-    if (status == -1) {
-        error(receiver_fd, "Receiver recv ack failed");
     } else {
-        info(receiver_fd, "Receiver recv ack success");
+        info(receiver_fd, "send public key success");
+    }
+    // receive ack
+    header = malloc(HEADER_LENGTH);
+    status = recv(receiver_fd, header, HEADER_LENGTH, 0);
+    opcode_t opcode = get_opcode(header);
+    free(header);
+    if (status == -1 || opcode != kOpAck) {
+        error(receiver_fd, "recv ack failed");
+    } else {
+        info(receiver_fd, "recv ack success");
     }
     return status;
 }
 
-int receive_data(int receiver_fd, packet_header_t *header,
-            packet_payload_t *payload)
+int receive_data(int receiver_fd, char sha256_str[65])
 {
+    packet_header_t header;
+    packet_payload_t payload;
     int status;
-
-
     // Receive file name
     char* fname;
-    *payload = malloc(GET_PAYLOAD_PACKET_LEN(1024));
-    status = recv(receiver_fd, *payload, GET_PAYLOAD_PACKET_LEN(1024), 0);
+    payload = malloc(GET_PAYLOAD_PACKET_LEN(1024));
+    status = recv(receiver_fd, payload, GET_PAYLOAD_PACKET_LEN(1024), 0);
+    copy_payload(payload, &fname);
+    free(payload);
     if (status == -1) {
-        error(receiver_fd, "Receiver recv file name failed");
+        error(receiver_fd, "recv file name failed");
         return status;
     } else {
-        copy_payload(*payload, &fname);
-        info(receiver_fd, "Receiver recv file name success: %s", fname);
+        info(receiver_fd, "recv file name success: %s", fname);
     }
 
     FILE *dst_file;
@@ -165,65 +173,79 @@ int receive_data(int receiver_fd, packet_header_t *header,
     }
 
     // Receive data
+    size_t payload_buf_len = GET_PAYLOAD_PACKET_LEN(1024);
 
-    int payload_buf_len = GET_PAYLOAD_PACKET_LEN(1024);
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256_CTX sha256;
+    SHA256_Init(&sha256);
 
     while (1) {
         // Receive header
-        *header = malloc(HEADER_LENGTH);
-        status = recv(receiver_fd, *header, HEADER_LENGTH, 0);
+        header = malloc(HEADER_LENGTH);
+        status = recv(receiver_fd, header, HEADER_LENGTH, 0);
+        opcode_t opcode = get_opcode(header);
+        payload_type_t payload_type = get_payload_type(header);
+        size_t seg_len = get_payload_length(header);
+        payload_buf_len = GET_PAYLOAD_PACKET_LEN(seg_len);
+        free(header);
         if (status == -1) {
-            error(receiver_fd, "Receiver recv data header failed");
+            error(receiver_fd, "recv data header failed");
             return status;
-        } else
-            info(receiver_fd, "Receiver recv data header success");
-
-        if (get_opcode(*header) == kOpFin) {
-            info(receiver_fd, "Receiver recv end");
+        } else  if (opcode == kOpFin && payload_type == kNone) {
+            info(receiver_fd, "recv end");
             break;
+        } else if (opcode == kOpData && payload_type == kData) {
+            info(receiver_fd, "wait for data");
         } else {
-            info(receiver_fd, "Receiver wait for data");
+            error(receiver_fd, "recv data header failed");
+            return -1;
         }
-
-        int payload_length = get_payload_length(*header);
-        payload_buf_len = GET_PAYLOAD_PACKET_LEN(payload_length);
 
         // Receive data
-        char* data;
-        *payload = malloc(payload_buf_len);
-        status = recv(receiver_fd, *payload, payload_buf_len, 0);
+        char *data_seg;
+        payload = malloc(payload_buf_len);
+        status = recv(receiver_fd, payload, payload_buf_len, 0);
+        copy_payload(payload, &data_seg);
+        free(payload);
         if (status == -1) {
-            error(receiver_fd, "Receiver recv data failed");
+            error(receiver_fd, "recv data failed");
             return status;
         } else {
-            copy_payload(*payload, &data);
-            //info(receiver_fd, "Receiver recv data success: %s", data);
+            info(receiver_fd, "recv data success");
         }
 
-        // Write data to file
-        if (!data) info(receiver_fd, "FFFFFFFFFFFFFFFFFFFFFFFFFF\n");
+        SHA256_Update(&sha256, data_seg, seg_len);
 
-        fwrite(data, sizeof(char), payload_length, dst_file);
-        free(data);
+        fwrite(data_seg, sizeof(char), seg_len, dst_file);
+        free(data_seg);
 
         // Send ack
-        create_header(header, kOpAck, kNone, 0);
-        status = send(receiver_fd, *header, HEADER_LENGTH, 0);
+        create_header(&header, kOpAck, kNone, 0);
+        status = send(receiver_fd, header, HEADER_LENGTH, 0);
+        free(header);
         if (status == -1) {
-            error(receiver_fd, "Receiver send ack failed");
+            error(receiver_fd, "send ack failed");
             return status;
         } else
-            info(receiver_fd, "Receiver send ack success");
+            info(receiver_fd, "send ack success");
 
     }
 
+    SHA256_Final(hash, &sha256);
+
+    for(int i = 0; i < SHA256_DIGEST_LENGTH; i++)
+    {
+        sprintf(sha256_str + (i * 2), "%02x", hash[i]);
+    }
+
     fclose(dst_file);
-    create_header(header, kOpFin, kNone, 0);
-    status = send(receiver_fd, *header, HEADER_LENGTH, 0);
+    create_header(&header, kOpFin, kNone, 0);
+    status = send(receiver_fd, header, HEADER_LENGTH, 0);
+    free(header);
     if (status == -1) {
-        error(receiver_fd, "Receiver finish failed");
+        error(receiver_fd, "finish failed");
     } else {
-        info(receiver_fd, "Receiver finish success");
+        info(receiver_fd, "finish success");
     }
     return status;
 }

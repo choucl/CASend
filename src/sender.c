@@ -5,18 +5,16 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <openssl/sha.h>
 #include "sock.h"
 #include "packet.h"
 #include "util.h"
 
-int send_intention(int sender_fd, packet_header_t *header,
-                            packet_payload_t *payload, char *fname);
+int send_intention(int sender_fd, char *fname);
 
-int receive_pub_key(int sender_fd, packet_header_t *header,
-                    packet_payload_t *payload, char *fname, char **pub_key);
+int receive_pub_key(int sender_fd, char *fname, char **pub_key);
 
-int send_data(int sender_fd, packet_header_t *header,
-                        packet_payload_t *payload, char *fname, char *pub_key);
+int send_data(int sender_fd, char *fname, char *pub_key, char sha256_str[65]);
 
 int main(int argc, char *argv[])
 {
@@ -74,21 +72,22 @@ int main(int argc, char *argv[])
 
     // Main process
     int status = 0;
-    packet_header_t sender_header;
-    packet_payload_t sender_payload;
 
-    status = send_intention(sender_fd, &sender_header, &sender_payload, fname);
+    status = send_intention(sender_fd, fname);
 
     if (status == -1) return status;
 
     char *pub_key;
-    status = receive_pub_key(sender_fd, &sender_header, &sender_payload, fname, &pub_key);
+    status = receive_pub_key(sender_fd, fname, &pub_key);
 
     if (status == -1) return status;
 
     info(sender_fd, "Get public key: %s", pub_key);
 
-    send_data(sender_fd, &sender_header, &sender_payload, fname, pub_key);
+    char sha256_str[65];
+
+    send_data(sender_fd, fname, pub_key, sha256_str);
+    info(sender_fd, "sha256: %s", sha256_str);
 
     if (status == -1) return status;
 
@@ -96,171 +95,206 @@ int main(int argc, char *argv[])
 
 }
 
-int send_intention(int sender_fd, packet_header_t *header,
-                            packet_payload_t *payload, char *fname)
+int send_intention(int sender_fd, char *fname)
 {
+    packet_header_t header;
+    packet_payload_t payload;
     int status;
-    // Sender send request header
+    // send request header
     size_t name_length = strlen(fname);
-    create_header(header, kOpCreate, kNone, name_length);
-    status = send(sender_fd, *header, HEADER_LENGTH, 0);
+    create_header(&header, kOpCreate, kData, name_length);
+    create_payload(&payload, 0, name_length, fname);
+    status = send(sender_fd, header, HEADER_LENGTH, 0);
+    free(header);
     if (status == -1) {
-        error(sender_fd, "Sender request failed");
+        error(sender_fd, "request failed");
         return status;
-    } else
-        info(sender_fd, "Sender request success");
-
-    // Sender send file name
-    create_payload(payload, 0, name_length, fname); //
-    char *fname_copy;
-    copy_payload(*payload, &fname_copy);
-    status = send(sender_fd, *payload, GET_PAYLOAD_PACKET_LEN(name_length), 0);
-    if (status == -1) {
-        error(sender_fd, "Sender send file name failed");
-        return status;
-    } else
-        info(sender_fd, "Sender send file name success: %s", fname_copy);
-
-    // Sender get acknowledgement
-    *header = malloc(HEADER_LENGTH);
-    status = recv(sender_fd, *header, HEADER_LENGTH, 0);
-    if (status == -1) {
-        error(sender_fd, "Sender recv ack failed");
-        return status;
-    } else
-        info(sender_fd, "Sender recv ack success");
-
-    // Sender get code
-    int* code;
-    *payload = malloc(GET_PAYLOAD_PACKET_LEN(sizeof(const int)));
-    status = recv(sender_fd, *payload, GET_PAYLOAD_PACKET_LEN(sizeof(const int)), 0);
-    if (status == -1) {
-        error(sender_fd, "Sender recv code failed");
     } else {
-        copy_payload(*payload, (char**)&code);
-        info(sender_fd, "Sender recv code success: %d", *code);
+        info(sender_fd, "request success");
     }
+
+    // send file name
+    status = send(sender_fd, payload, GET_PAYLOAD_PACKET_LEN(name_length), 0);
+    free(payload);
+    if (status == -1) {
+        error(sender_fd, "send file name failed");
+        return status;
+    } else {
+        info(sender_fd, "send file name success: %s", fname);
+    }
+
+    // get acknowledgement
+    header = malloc(HEADER_LENGTH);
+    status = recv(sender_fd, header, HEADER_LENGTH, 0);
+    opcode_t opcode = get_opcode(header);
+    payload_type_t payload_type = get_payload_type(header);
+    free(header);
+    if (status == -1 || opcode != kOpAck || payload_type != kCode) {
+        error(sender_fd, "recv ack failed");
+        return status;
+    } else {
+        info(sender_fd, "recv ack success");
+    }
+
+    // get code
+    int* code;
+    size_t code_payload_length = GET_PAYLOAD_PACKET_LEN(sizeof(const int));
+    payload = malloc(code_payload_length);
+    status = recv(sender_fd, payload, code_payload_length, 0);
+    if (status == -1) {
+        error(sender_fd, "recv code failed");
+    } else {
+        copy_payload(payload, (char**)&code);
+        info(sender_fd, "recv code success: %d", *code);
+    }
+    free(payload);
 
     return status;
 }
 
-int receive_pub_key(int sender_fd, packet_header_t *header,
-                    packet_payload_t *payload, char *fname, char **pub_key)
+int receive_pub_key(int sender_fd, char *fname, char **pub_key)
 {
     int status;
-    // Sender recv public key header
-    *header = malloc(HEADER_LENGTH);
-    status = recv(sender_fd, *header, HEADER_LENGTH, 0);
-    if (status == -1) {
-        error(sender_fd, "Sender recv public key header failed");
+    // recv public key header
+    packet_header_t header = malloc(HEADER_LENGTH);
+    packet_payload_t payload = malloc(GET_PAYLOAD_PACKET_LEN(64));
+    status = recv(sender_fd, header, HEADER_LENGTH, 0);
+    opcode_t opcode = get_opcode(header);
+    payload_type_t payload_type = get_payload_type(header);
+    free(header);
+    if (status == -1 || opcode != kOpPub || payload_type != kPubKey) {
+        error(sender_fd, "recv public key header failed");
         return status;
     } else {
-        info(sender_fd, "Sender recv public key header success");
+        info(sender_fd, "recv public key header success");
     }
 
-    // Sender recv public key
-    *payload = malloc(GET_PAYLOAD_PACKET_LEN(64));
-    status = recv(sender_fd, *payload, GET_PAYLOAD_PACKET_LEN(64), 0);
+    // recv public key
+    status = recv(sender_fd, payload, GET_PAYLOAD_PACKET_LEN(64), 0);
+
+    copy_payload(payload, pub_key);
+    free(payload);
     if (status == -1) {
-        error(sender_fd, "Sender recv public key failed");
+        error(sender_fd, "recv public key failed");
         return status;
     } else {
-        copy_payload(*payload, pub_key);
-        info(sender_fd, "Sender recv public key success: %s", *pub_key);
+        info(sender_fd, "recv public key success: %s", *pub_key);
     }
 
-    // Sender ack public key
-    create_header(header, kOpAck, kPubKey, 0);
-    status = send(sender_fd, *header, HEADER_LENGTH, 0);
+    // ack public key
+    create_header(&header, kOpAck, kPubKey, 0);
+    status = send(sender_fd, header, HEADER_LENGTH, 0);
+    free(header);
     if (status == -1) {
-        error(sender_fd, "Sender ack public key failed");
+        error(sender_fd, "ack public key failed");
     } else {
-        info(sender_fd, "Sender ack public key success");
+        info(sender_fd, "ack public key success");
     }
+
     return status;
 }
 
-int send_data(int sender_fd, packet_header_t *header,
-                        packet_payload_t *payload, char *fname, char *pub_key)
+int send_data(int sender_fd, char *fname, char *pub_key, char sha256_str[65])
 {
     FILE *src_file;
     src_file = fopen(fname, "rb");
 
     if (src_file == NULL) {
-        error(sender_fd, "Error opening source file");
+        error(sender_fd, "Error: can not open file %s", fname);
         return 1;
     } else {
         info(sender_fd, "Open file %s successfully", fname);
     }
 
-    size_t chunk_size = 1024;
-    char *data_chunk = malloc(chunk_size * sizeof(char));
     int status;
-    int final_chunk = 0;
-    size_t payload_length;
 
+    size_t max_len = 1024;
+    size_t seg_len;
+    char *data_seg = malloc(max_len * sizeof(char));
+    int last_seg = 0;
+
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256_CTX sha256;
+    SHA256_Init(&sha256);
+
+    packet_header_t header;
+    packet_payload_t payload;
     // Read data & send
     while (1) {
+        seg_len = fread(data_seg, sizeof(char), max_len, src_file);
+        if (seg_len < max_len) {
+            last_seg = 1;
+        }
 
-        payload_length = fread(data_chunk, sizeof(char), chunk_size, src_file);
-
-        if (payload_length < chunk_size) {
-            chunk_size = payload_length;
-            final_chunk = 1;
-            //info(sender_fd, "Last chunk size %ld", payload_length);
-        } //else {
-            //info(sender_fd, "Chunk size %ld", payload_length);
-        //}
+        SHA256_Update(&sha256, data_seg, seg_len);
 
         // Send data header
-        create_header(header, kOpData, kData, chunk_size);
-        status = send(sender_fd, *header, HEADER_LENGTH, 0);
+        create_header(&header, kOpData, kData, seg_len);
+        status = send(sender_fd, header, HEADER_LENGTH, 0);
+        free(header);
         if (status == -1) {
-            error(sender_fd, "Sender send data header failed");
+            error(sender_fd, "send data header failed");
             return status;
-        } else
-            info(sender_fd, "Sender send data header success");
+        } else {
+            info(sender_fd, "send data header success");
+        }
 
         //  Send data paylaod
-        create_payload(payload, 0, chunk_size, data_chunk);
-        status = send(sender_fd, *payload, GET_PAYLOAD_PACKET_LEN(chunk_size), 0);
+        create_payload(&payload, 0, seg_len, data_seg);
+        status = send(sender_fd, payload, GET_PAYLOAD_PACKET_LEN(seg_len), 0);
+        free(payload);
         if (status == -1) {
-            error(sender_fd, "Sender send data failed");
+            error(sender_fd, "send data failed");
             return status;
-        } else
-            info(sender_fd, "Sender send data success");
-
+        } else {
+            info(sender_fd, "send data success");
+        }
         //  Receive ack
-        *header = malloc(HEADER_LENGTH);
-        status = recv(sender_fd, *header, HEADER_LENGTH, 0);
-        if (status == -1) {
-            error(sender_fd, "Sender recv ack failed");
+        header = malloc(HEADER_LENGTH);
+        status = recv(sender_fd, header, HEADER_LENGTH, 0);
+        opcode_t opcode = get_opcode(header);
+        free(header);
+        if (status == -1 || opcode != kOpAck) {
+            error(sender_fd, "recv ack failed");
             return status;
-        } else
-            info(sender_fd, "Sender recv ack success");
+        } else {
+            info(sender_fd, "recv ack success");
+        }
 
-        if (final_chunk) break;
+        if (last_seg) break;
+    }
+
+
+    SHA256_Final(hash, &sha256);
+
+    for(int i = 0; i < SHA256_DIGEST_LENGTH; i++)
+    {
+        sprintf(sha256_str + (i * 2), "%02x", hash[i]);
     }
 
     // End of data transfer
     fclose(src_file);
 
     // Send finish header
-    create_header(header, kOpFin, kNone, 0);
-    status = send(sender_fd, *header, HEADER_LENGTH, 0);
+    create_header(&header, kOpFin, kNone, 0);
+    status = send(sender_fd, header, HEADER_LENGTH, 0);
+    free(header);
     if (status == -1) {
-        error(sender_fd, "Sender end sending failed");
+        error(sender_fd, "end sending failed");
         return status;
-    } else
-        info(sender_fd, "Sender end sending success");
-
-    // Receive finish ack
-    *header = malloc(HEADER_LENGTH);
-    status = recv(sender_fd, *header, HEADER_LENGTH, 0);
-    if (status == -1) {
-        error(sender_fd, "Sender finish failed");
     } else {
-        info(sender_fd, "Sender finish success");
+        info(sender_fd, "end sending success");
     }
+    // Receive finish ack
+    header = malloc(HEADER_LENGTH);
+    status = recv(sender_fd, header, HEADER_LENGTH, 0);
+    opcode_t opcode = get_opcode(header);
+    free(header);
+    if (status == -1 || opcode != kOpAck) {
+        error(sender_fd, "finish failed");
+    } else {
+        info(sender_fd, "finish success");
+    }
+
     return status;
 }
