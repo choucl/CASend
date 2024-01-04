@@ -127,6 +127,7 @@ int recv_fname(int receiver_fd, char **fname) {
     free(header);
     if (status == -1 || opcode != kOpAck) {
         error(receiver_fd, "recv ack failed");
+        return status;
     } else {
         info(receiver_fd, "recv ack success");
     }
@@ -137,7 +138,6 @@ int recv_fname(int receiver_fd, char **fname) {
     free(payload);
     if (status == -1) {
         error(receiver_fd, "recv file name failed");
-
     } else {
         info(receiver_fd, "recv file name success: %s", *fname);
     }
@@ -233,8 +233,8 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname) {
         if (status == -1) {
             error(receiver_fd, "recv data header failed");
             return status;
-        } else  if (opcode == kOpFin && payload_type == kNone) {
-            info(receiver_fd, "recv end");
+        } else  if (opcode == kOpFin && payload_type == kHash) {
+            info(receiver_fd, "recv finish");
             break;
         } else if (opcode == kOpData && payload_type == kData) {
             info(receiver_fd, "wait for data");
@@ -284,7 +284,29 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname) {
     }
 
     fclose(dst_file);
-    create_header(&header, kOpFin, kNone, 0);
+
+    // recv sha256
+    char *sha256_str_buf;
+    size_t sha256_payload_len = GET_PAYLOAD_PACKET_LEN(65);
+    payload = malloc(sha256_payload_len);
+    status = recv(receiver_fd, payload, sha256_payload_len, 0);
+    copy_payload(payload, &sha256_str_buf);
+    free(payload);
+    if (status == -1) {
+        error(receiver_fd, "recv sha256 failed");
+        return status;
+    } else {
+        info(receiver_fd, "recv sha256 success");
+    }
+
+    // compare sha256
+    status = strncmp(sha256_str, sha256_str_buf, 65);
+    if (status != 0) {
+        error(receiver_fd, "data between sender and receiver is inconsist");
+    }
+
+    // send ack sha256
+    create_header(&header, kOpAck, kNone, 0);
     status = send(receiver_fd, header, HEADER_LENGTH, 0);
     free(header);
     if (status == -1) {

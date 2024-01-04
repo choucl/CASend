@@ -332,16 +332,29 @@ int send_data(int sender_fd, char *fname, char *pub_key, char sha256_str[65])
     // End of data transfer
     fclose(src_file);
 
-    // Send finish header
-    create_header(&header, kOpFin, kNone, 0);
+    // Send sha256 header
+    create_header(&header, kOpFin, kHash, 65);
     status = send(sender_fd, header, HEADER_LENGTH, 0);
     free(header);
     if (status == -1) {
-        error(sender_fd, "end sending failed");
+        error(sender_fd, "send sha256 header failed");
         return status;
     } else {
-        info(sender_fd, "end sending success");
+        info(sender_fd, "send sha256 header sending success");
     }
+
+    // Send sha256 payload
+    size_t sha256_payload_len = GET_PAYLOAD_PACKET_LEN(65);
+    create_payload(&payload, 0, sha256_payload_len, sha256_str);
+    status = send(sender_fd, payload, sha256_payload_len, 0);
+    free(payload);
+    if (status == -1) {
+        error(sender_fd, "send sha256 failed");
+        return status;
+    } else {
+        info(sender_fd, "send sha256 success");
+    }
+
     // Receive finish ack
     header = malloc(HEADER_LENGTH);
     status = recv(sender_fd, header, HEADER_LENGTH, 0);
