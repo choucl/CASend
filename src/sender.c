@@ -10,7 +10,7 @@
 #include "packet.h"
 #include "util.h"
 
-int send_intention(int sender_fd, char *fname);
+int register_new_transfer(int sender_fd, char *fname);
 
 int receive_pub_key(int sender_fd, char *fname, char **pub_key);
 
@@ -73,7 +73,7 @@ int main(int argc, char *argv[])
     // Main process
     int status = 0;
 
-    status = send_intention(sender_fd, fname);
+    status = register_new_transfer(sender_fd, fname);
 
     if (status == -1) return status;
 
@@ -95,15 +95,12 @@ int main(int argc, char *argv[])
 
 }
 
-int send_intention(int sender_fd, char *fname)
-{
+int send_intention(int sender_fd, char fname_pub_key[64]) {
     packet_header_t header;
     packet_payload_t payload;
     int status;
     // send request header
-    size_t name_length = strlen(fname);
-    create_header(&header, kOpCreate, kData, name_length);
-    create_payload(&payload, 0, name_length, fname);
+    create_header(&header, kOpCreate, kPubKey, 64 * sizeof(char));
     status = send(sender_fd, header, HEADER_LENGTH, 0);
     free(header);
     if (status == -1) {
@@ -113,17 +110,25 @@ int send_intention(int sender_fd, char *fname)
         info(sender_fd, "request success");
     }
 
-    // send file name
-    status = send(sender_fd, payload, GET_PAYLOAD_PACKET_LEN(name_length), 0);
+    // send file name public key
+    size_t key_payload_len = GET_PAYLOAD_PACKET_LEN(64);
+    create_payload(&payload, 0, key_payload_len, fname_pub_key);
+    status = send(sender_fd, payload, key_payload_len, 0);
     free(payload);
     if (status == -1) {
-        error(sender_fd, "send file name failed");
+        error(sender_fd, "send file name public key failed");
         return status;
     } else {
-        info(sender_fd, "send file name success: %s", fname);
+        info(sender_fd, "send file name public key success: %s", fname_pub_key);
     }
+    return status;
+}
 
-    // get acknowledgement
+int recv_code(int sender_fd, int *code) {
+    packet_header_t header;
+    packet_payload_t payload;
+    int status;
+    // receive ack & code header
     header = malloc(HEADER_LENGTH);
     status = recv(sender_fd, header, HEADER_LENGTH, 0);
     opcode_t opcode = get_opcode(header);
@@ -136,18 +141,70 @@ int send_intention(int sender_fd, char *fname)
         info(sender_fd, "recv ack success");
     }
 
-    // get code
-    int* code;
+    // receive code
     size_t code_payload_length = GET_PAYLOAD_PACKET_LEN(sizeof(const int));
     payload = malloc(code_payload_length);
     status = recv(sender_fd, payload, code_payload_length, 0);
+    copy_payload(payload, (char**)&code);
+    free(payload);
     if (status == -1) {
         error(sender_fd, "recv code failed");
     } else {
-        copy_payload(payload, (char**)&code);
         info(sender_fd, "recv code success: %d", *code);
     }
+    return status;
+}
+
+int send_fname(int sender_fd, char *fname) {
+    packet_header_t header;
+    packet_payload_t payload;
+    int status;
+    // send file name header
+    size_t name_length = strlen(fname);
+    create_header(&header, kOpData, kData, name_length);
+    status = send(sender_fd, header, HEADER_LENGTH, 0);
+    free(header);
+    if (status == -1) {
+        error(sender_fd, "send file name header failed");
+        return status;
+    } else {
+        info(sender_fd, "send file name header success");
+    }
+
+    // send file name
+    create_payload(&payload, 0, name_length, fname);
+    status = send(sender_fd, payload, GET_PAYLOAD_PACKET_LEN(name_length), 0);
     free(payload);
+    if (status == -1) {
+        error(sender_fd, "send file name failed");
+    } else {
+        info(sender_fd, "send file name success: %s", fname);
+    }
+    return status;
+}
+
+int register_new_transfer(int sender_fd, char *fname)
+{
+    int status = 0;
+    char *fname_pub_key = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+    status = send_intention(sender_fd, fname_pub_key);
+    if (status == -1) return status;
+    int code;
+    status = recv_code(sender_fd, &code);
+    if (status == -1) return status;
+    status = send_fname(sender_fd, fname);
+    // receive ack & code header
+    //packet_header_t header = malloc(HEADER_LENGTH);
+    //status = recv(sender_fd, header, HEADER_LENGTH, 0);
+    //opcode_t opcode = get_opcode(header);
+    //payload_type_t payload_type = get_payload_type(header);
+    //free(header);
+    //if (status == -1 || opcode != kOpAck || payload_type != kData) {
+    //    error(sender_fd, "recv ack failed");
+    //    return status;
+    //} else {
+    //    info(sender_fd, "recv ack success");
+    //}
 
     return status;
 }
@@ -157,7 +214,6 @@ int receive_pub_key(int sender_fd, char *fname, char **pub_key)
     int status;
     // recv public key header
     packet_header_t header = malloc(HEADER_LENGTH);
-    packet_payload_t payload = malloc(GET_PAYLOAD_PACKET_LEN(64));
     status = recv(sender_fd, header, HEADER_LENGTH, 0);
     opcode_t opcode = get_opcode(header);
     payload_type_t payload_type = get_payload_type(header);
@@ -170,6 +226,7 @@ int receive_pub_key(int sender_fd, char *fname, char **pub_key)
     }
 
     // recv public key
+    packet_payload_t payload = malloc(GET_PAYLOAD_PACKET_LEN(64));
     status = recv(sender_fd, payload, GET_PAYLOAD_PACKET_LEN(64), 0);
 
     copy_payload(payload, pub_key);
