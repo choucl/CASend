@@ -21,7 +21,7 @@ int send_intention(int sender_fd, char fname_pub_key[64]) {
   free(header);
   if (status == -1) {
     error(sender_fd, "request failed");
-    return status;
+    return -1;
   } else {
     info(sender_fd, "request success");
   }
@@ -33,11 +33,11 @@ int send_intention(int sender_fd, char fname_pub_key[64]) {
   free(payload);
   if (status == -1) {
     error(sender_fd, "send file name public key failed");
-    return status;
+    return -1;
   } else {
     info(sender_fd, "send file name public key success: %s", fname_pub_key);
   }
-  return status;
+  return 0;
 }
 
 int recv_code(int sender_fd, int *code) {
@@ -52,7 +52,7 @@ int recv_code(int sender_fd, int *code) {
   free(header);
   if (status == -1 || opcode != kOpAck || payload_type != kCode) {
     error(sender_fd, "recv ack failed");
-    return status;
+    return -1;
   } else {
     info(sender_fd, "recv ack success");
   }
@@ -65,10 +65,11 @@ int recv_code(int sender_fd, int *code) {
   free(payload);
   if (status == -1) {
     error(sender_fd, "recv code failed");
+    return -1;
   } else {
     info(sender_fd, "recv code success: %d", *code);
   }
-  return status;
+  return 0;
 }
 
 int send_fname(int sender_fd, char *fname) {
@@ -82,7 +83,7 @@ int send_fname(int sender_fd, char *fname) {
   free(header);
   if (status == -1) {
     error(sender_fd, "send file name header failed");
-    return status;
+    return -1;
   } else {
     info(sender_fd, "send file name header success");
   }
@@ -93,10 +94,11 @@ int send_fname(int sender_fd, char *fname) {
   free(payload);
   if (status == -1) {
     error(sender_fd, "send file name failed");
+    return -1;
   } else {
     info(sender_fd, "send file name success: %s", fname);
   }
-  return status;
+  return 0;
 }
 
 int register_new_transfer(int sender_fd, char *fname) {
@@ -104,25 +106,13 @@ int register_new_transfer(int sender_fd, char *fname) {
   char *fname_pub_key =
       "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
   status = send_intention(sender_fd, fname_pub_key);
-  if (status == -1) return status;
+  if (status == -1) return -1;
   int code;
   status = recv_code(sender_fd, &code);
-  if (status == -1) return status;
+  if (status == -1) return -1;
   status = send_fname(sender_fd, fname);
-  // receive ack & code header
-  // packet_header_t header = malloc(HEADER_LENGTH);
-  // status = recv(sender_fd, header, HEADER_LENGTH, 0);
-  // opcode_t opcode = get_opcode(header);
-  // payload_type_t payload_type = get_payload_type(header);
-  // free(header);
-  // if (status == -1 || opcode != kOpAck || payload_type != kData) {
-  //    error(sender_fd, "recv ack failed");
-  //    return status;
-  //} else {
-  //    info(sender_fd, "recv ack success");
-  //}
-
-  return status;
+  if (status == -1) return -1;
+  return 0;
 }
 
 int receive_pub_key(int sender_fd, char *fname, char **pub_key) {
@@ -135,7 +125,7 @@ int receive_pub_key(int sender_fd, char *fname, char **pub_key) {
   free(header);
   if (status == -1 || opcode != kOpPub || payload_type != kPubKey) {
     error(sender_fd, "recv public key header failed");
-    return status;
+    return -1;
   } else {
     info(sender_fd, "recv public key header success");
   }
@@ -148,7 +138,7 @@ int receive_pub_key(int sender_fd, char *fname, char **pub_key) {
   free(payload);
   if (status == -1) {
     error(sender_fd, "recv public key failed");
-    return status;
+    return -1;
   } else {
     info(sender_fd, "recv public key success: %s", *pub_key);
   }
@@ -159,11 +149,12 @@ int receive_pub_key(int sender_fd, char *fname, char **pub_key) {
   free(header);
   if (status == -1) {
     error(sender_fd, "ack public key failed");
+    return -1;
   } else {
     info(sender_fd, "ack public key success");
   }
 
-  return status;
+  return 0;
 }
 
 int send_data(int sender_fd, char *fname, char *pub_key, char sha256_str[65]) {
@@ -205,7 +196,7 @@ int send_data(int sender_fd, char *fname, char *pub_key, char sha256_str[65]) {
     free(header);
     if (status == -1) {
       error(sender_fd, "send data header failed");
-      return status;
+      return -1;
     } else {
       info(sender_fd, "send data header success");
     }
@@ -216,7 +207,7 @@ int send_data(int sender_fd, char *fname, char *pub_key, char sha256_str[65]) {
     free(payload);
     if (status == -1) {
       error(sender_fd, "send data failed");
-      return status;
+      return -1;
     } else {
       info(sender_fd, "send data success");
     }
@@ -227,7 +218,7 @@ int send_data(int sender_fd, char *fname, char *pub_key, char sha256_str[65]) {
     free(header);
     if (status == -1 || opcode != kOpAck) {
       error(sender_fd, "recv ack failed");
-      return status;
+      return -1;
     } else {
       info(sender_fd, "recv ack success");
     }
@@ -250,7 +241,7 @@ int send_data(int sender_fd, char *fname, char *pub_key, char sha256_str[65]) {
   free(header);
   if (status == -1) {
     error(sender_fd, "send sha256 header failed");
-    return status;
+    return -1;
   } else {
     info(sender_fd, "send sha256 header sending success");
   }
@@ -262,7 +253,7 @@ int send_data(int sender_fd, char *fname, char *pub_key, char sha256_str[65]) {
   free(payload);
   if (status == -1) {
     error(sender_fd, "send sha256 failed");
-    return status;
+    return -1;
   } else {
     info(sender_fd, "send sha256 success");
   }
@@ -274,11 +265,12 @@ int send_data(int sender_fd, char *fname, char *pub_key, char sha256_str[65]) {
   free(header);
   if (status == -1 || opcode != kOpAck) {
     error(sender_fd, "finish failed");
+    return -1;
   } else {
     info(sender_fd, "finish success");
   }
 
-  return status;
+  return 0;
 }
 
 int main(int argc, char *argv[]) {
@@ -340,12 +332,12 @@ int main(int argc, char *argv[]) {
 
   status = register_new_transfer(sender_fd, fname);
 
-  if (status == -1) return status;
+  if (status == -1) return -1;
 
   char *pub_key;
   status = receive_pub_key(sender_fd, fname, &pub_key);
 
-  if (status == -1) return status;
+  if (status == -1) return -1;
 
   info(sender_fd, "Get public key: %s", pub_key);
 
@@ -354,7 +346,7 @@ int main(int argc, char *argv[]) {
   send_data(sender_fd, fname, pub_key, sha256_str);
   info(sender_fd, "sha256: %s", sha256_str);
 
-  if (status == -1) return status;
+  if (status == -1) return -1;
 
   return 0;
 }

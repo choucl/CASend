@@ -22,7 +22,7 @@ int recv_intention(int receiver_fd, char *input_code) {
   free(header);
   if (status == -1) {
     error(receiver_fd, "request failed");
-    return status;
+    return -1;
   } else
     info(receiver_fd, "request success");
 
@@ -37,11 +37,12 @@ int recv_intention(int receiver_fd, char *input_code) {
   free(payload);
   if (status == -1) {
     error(receiver_fd, "send code failed");
+    return -1;
   } else {
     info(receiver_fd, "send code success: %d", *code);
   }
-
-  return status;
+  free(code);
+  return 0;
 }
 
 int recv_fname(int receiver_fd, char **fname) {
@@ -54,10 +55,10 @@ int recv_fname(int receiver_fd, char **fname) {
   opcode_t opcode = get_opcode(header);
   free(header);
   if (status == -1 || opcode != kOpAck) {
-    error(receiver_fd, "recv ack failed");
-    return status;
+    error(receiver_fd, "recv file name header & ack failed");
+    return -1;
   } else {
-    info(receiver_fd, "recv ack success");
+    info(receiver_fd, "recv file name header & ack success");
   }
   // Receive file name
   payload = malloc(GET_PAYLOAD_PACKET_LEN(1024));
@@ -66,10 +67,11 @@ int recv_fname(int receiver_fd, char **fname) {
   free(payload);
   if (status == -1) {
     error(receiver_fd, "recv file name failed");
+    return -1;
   } else {
     info(receiver_fd, "recv file name success: %s", *fname);
   }
-  return status;
+  return 0;
 }
 
 int send_pub_key(int receiver_fd, char *data_pub_key) {
@@ -83,7 +85,7 @@ int send_pub_key(int receiver_fd, char *data_pub_key) {
   free(header);
   if (status == -1) {
     error(receiver_fd, "send public key header failed");
-    return status;
+    return -1;
   } else {
     info(receiver_fd, "send public key header success");
   }
@@ -93,7 +95,7 @@ int send_pub_key(int receiver_fd, char *data_pub_key) {
   free(payload);
   if (status == -1) {
     error(receiver_fd, "send public key failed");
-    return status;
+    return -1;
   } else {
     info(receiver_fd, "send public key success");
   }
@@ -104,42 +106,42 @@ int send_pub_key(int receiver_fd, char *data_pub_key) {
   free(header);
   if (status == -1 || opcode != kOpAck) {
     error(receiver_fd, "recv ack failed");
+    return -1;
   } else {
     info(receiver_fd, "recv ack success");
   }
-  return status;
+  return 0;
 }
 
 int request_transfer(int receiver_fd, char *input_code, char **fname) {
   int status = 0;
 
   status = recv_intention(receiver_fd, input_code);
-  if (status == -1) return status;
-
+  if (status == -1) return -1;
   status = recv_fname(receiver_fd, fname);
-  if (status == -1) return status;
-
+  if (status == -1) return -1;
   char *pub_key = malloc(64 * sizeof(char));
   pub_key = "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd";
   status = send_pub_key(receiver_fd, pub_key);
+  if (status == -1) return -1;
 
-  info(receiver_fd, "request transfer successfully");
-
-  return status;
+  return 0;
 }
 
-int receive_data(int receiver_fd, char sha256_str[65], char *fname) {
+int receive_data(int receiver_fd, char sha256_str[65], char *fname,
+                 char *directory) {
   packet_header_t header;
   packet_payload_t payload;
   int status;
 
   FILE *dst_file;
-  dst_file = fopen(fname, "wb");
+  char *file_path = strcat(directory, fname);
+  dst_file = fopen(file_path, "wb");
   if (dst_file == NULL) {
     error(receiver_fd, "Error opening destination file");
-    return 1;
+    return -1;
   } else {
-    info(receiver_fd, "Open file %s successfully", fname);
+    info(receiver_fd, "Open file %s successfully", file_path);
   }
 
   // Receive data
@@ -160,7 +162,7 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname) {
     free(header);
     if (status == -1) {
       error(receiver_fd, "recv data header failed");
-      return status;
+      return -1;
     } else if (opcode == kOpFin && payload_type == kHash) {
       info(receiver_fd, "recv finish");
       break;
@@ -179,7 +181,7 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname) {
     free(payload);
     if (status == -1) {
       error(receiver_fd, "recv data failed");
-      return status;
+      return -1;
     } else {
       info(receiver_fd, "recv data success");
     }
@@ -195,7 +197,7 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname) {
     free(header);
     if (status == -1) {
       error(receiver_fd, "send ack failed");
-      return status;
+      return -1;
     } else {
       info(receiver_fd, "send ack success");
     }
@@ -218,7 +220,7 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname) {
   free(payload);
   if (status == -1) {
     error(receiver_fd, "recv sha256 failed");
-    return status;
+    return -1;
   } else {
     info(receiver_fd, "recv sha256 success");
   }
@@ -227,6 +229,7 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname) {
   status = strncmp(sha256_str, sha256_str_buf, 65);
   if (status != 0) {
     error(receiver_fd, "data between sender and receiver is inconsist");
+    return -1;
   }
 
   // send ack sha256
@@ -235,18 +238,20 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname) {
   free(header);
   if (status == -1) {
     error(receiver_fd, "finish failed");
+    return -1;
   } else {
     info(receiver_fd, "finish success");
   }
 
-  return status;
+  return 0;
 }
 
 int main(int argc, char *argv[]) {
-  char *host = NULL, *port = NULL, *input_code = NULL;
+  char *host = NULL, *port = NULL, *directory = NULL, *input_code = NULL;
 
-  if (argc != 7) {
-    printf("Usage: ./client -i server_ip -p server_port -c input_code\n");
+  if (argc != 9) {
+    printf(
+        "Usage: ./client -i server_ip -p server_port -d directory -c code\n");
     return -1;
   }
 
@@ -268,6 +273,16 @@ int main(int argc, char *argv[]) {
     if (argc < 1) return -1;
     port = malloc(sizeof(char) * strlen(*argv) + 1);
     strncpy(port, *argv, strlen(*argv));
+  }
+
+  --argc;
+  ++argv;
+  if (argc > 0 && **argv == '-' && (*argv)[1] == 'd') {
+    --argc;
+    ++argv;
+    if (argc < 1) return -1;
+    directory = malloc(sizeof(char) * strlen(*argv) + 1);
+    sprintf(directory, "%s/", *argv);
   }
 
   --argc;
@@ -305,7 +320,7 @@ int main(int argc, char *argv[]) {
   if (status == -1) return status;
 
   char sha256_str[65];
-  status = receive_data(receiver_fd, sha256_str, fname);
+  status = receive_data(receiver_fd, sha256_str, fname, directory);
 
   info(receiver_fd, "sha256: %s", sha256_str);
 
