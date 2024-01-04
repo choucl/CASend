@@ -117,6 +117,7 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
     error(clientfd, "fail creating code payload");
     goto SEND_INTENTION_RET;
   }
+  send(clientfd, send_code_payload, payload_size, 0);
 
   // receive name header
   packet_header_t recv_name_header = malloc(HEADER_LENGTH);
@@ -144,8 +145,6 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
   (*entry)->name = name;
   (*entry)->name_length = name_length;
   free(recv_name_payload);
-
-  send(clientfd, send_code_payload, payload_size, 0);
   free(send_code_payload);
 SEND_INTENTION_RET:
   return status;
@@ -205,6 +204,9 @@ REQ_ERR_RET:
 
 static int bypass_packet(service_entry_t *entry, int sender_to_receiver,
                          int has_payload, int *transmit_finish) {
+  while (entry->receiver_fd == -1 || entry->receiver_fd == -1) {
+    asm("");
+  }
   int status = 0;
   long send_fd = (sender_to_receiver) ? entry->sender_fd : entry->receiver_fd;
   long recv_fd = (sender_to_receiver) ? entry->receiver_fd : entry->sender_fd;
