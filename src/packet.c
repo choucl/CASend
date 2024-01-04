@@ -13,7 +13,7 @@ int create_header(packet_header_t *packet_header, opcode_t opcode,
   ((int *)*packet_header)[0] = opcode;
   ((int *)*packet_header)[1] = payload_type;
   ((int *)*packet_header)[2] = payload_length;
-  return 0;
+  return 1;
 }
 
 int create_payload(packet_payload_t *packet_payload, int num_packet,
@@ -62,7 +62,7 @@ int copy_payload(packet_payload_t payload, char **dst) {
   *dst = malloc(sizeof(char) * payload_size);
   if (*dst == NULL) return -1;
   memcpy(*dst, &payload[2 * sizeof(int)], payload_size);
-  return 0;
+  return 1;
 }
 
 int check_header_op(packet_header_t header, opcode_t expected_opcode) {
@@ -72,5 +72,5 @@ int check_header_op(packet_header_t header, opcode_t expected_opcode) {
           expected_opcode);
     return -1;
   }
-  return 0;
+  return 1;
 }
