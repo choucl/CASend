@@ -9,23 +9,28 @@ SOURCES := $(wildcard $(SRC_DIR)/*.c)
 OBJECTS := $(SOURCES:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
 
 SERVER_TARGET := $(BUILD_DIR)/server
-CLIENT_TARGET := $(BUILD_DIR)/client
+SENDER_TARGET := $(BUILD_DIR)/sender
+RECEIVER_TARGET := $(BUILD_DIR)/receiver
 
 __dir := $(shell mkdir -p $(BUILD_DIR))
 
 DEBUG = -g
 CFLAGS = -Wall -I$(INC_DIR) $(DEBUG)
-LDFLAGS = -lpthread -lm
+LDFLAGS = -lpthread -lm -lcrypto
 
 .PHONY: clean all
 
-all: $(OBJECTS) $(SERVER_TARGET) $(CLIENT_TARGET)
+all: $(OBJECTS) $(SERVER_TARGET) $(SENDER_TARGET) $(RECEIVER_TARGET)
 
 $(SERVER_TARGET): $(addprefix $(BUILD_DIR)/, server.o sock.o packet.o util.o)
 	@echo [LINK] $@
 	@$(CC) -o $@ $^ $(LDFLAGS)
 
-$(CLIENT_TARGET): $(addprefix $(BUILD_DIR)/, client.o sock.o packet.o util.o)
+$(SENDER_TARGET): $(addprefix $(BUILD_DIR)/, sender.o sock.o packet.o util.o)
+	@echo [LINK] $@
+	@$(CC) -o $@ $^ $(LDFLAGS)
+
+$(RECEIVER_TARGET): $(addprefix $(BUILD_DIR)/, receiver.o sock.o packet.o util.o)
 	@echo [LINK] $@
 	@$(CC) -o $@ $^ $(LDFLAGS)
 
