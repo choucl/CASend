@@ -8,6 +8,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "config.h"
 #include "packet.h"
 #include "sock.h"
 #include "util.h"
@@ -61,8 +62,9 @@ int recv_fname(int receiver_fd, char **fname) {
     info(receiver_fd, "recv file name header & ack success");
   }
   // Receive file name
-  payload = malloc(GET_PAYLOAD_PACKET_LEN(1024));
-  status = recv(receiver_fd, payload, GET_PAYLOAD_PACKET_LEN(1024), 0);
+  int max_len = GET_PAYLOAD_PACKET_LEN(MAX_PAYLOAD_LEN);
+  payload = malloc(max_len);
+  status = recv(receiver_fd, payload, max_len, 0);
   copy_payload(payload, fname);
   free(payload);
   if (status == -1) {
@@ -145,7 +147,7 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname,
   }
 
   // Receive data
-  size_t payload_buf_len = GET_PAYLOAD_PACKET_LEN(1024);
+  size_t payload_buf_len = GET_PAYLOAD_PACKET_LEN(MAX_PAYLOAD_LEN);
 
   unsigned char hash[SHA256_DIGEST_LENGTH];
   SHA256_CTX sha256;

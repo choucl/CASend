@@ -7,6 +7,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "config.h"
 #include "packet.h"
 #include "sock.h"
 #include "util.h"
@@ -170,7 +171,7 @@ int send_data(int sender_fd, char *fname, char *pub_key, char sha256_str[65]) {
 
   int status;
 
-  size_t max_len = 1024;
+  size_t max_len = MAX_PAYLOAD_LEN;
   size_t seg_len;
   char *data_seg = malloc(max_len * sizeof(char));
   int last_seg = 0;
