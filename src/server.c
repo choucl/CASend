@@ -117,6 +117,7 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
     error(clientfd, "fail creating code payload");
     goto SEND_INTENTION_RET;
   }
+  send(clientfd, send_code_payload, payload_size, 0);
 
   // receive name header
   packet_header_t recv_name_header = malloc(HEADER_LENGTH);
@@ -144,8 +145,6 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
   (*entry)->name = name;
   (*entry)->name_length = name_length;
   free(recv_name_payload);
-
-  send(clientfd, send_code_payload, payload_size, 0);
   free(send_code_payload);
 SEND_INTENTION_RET:
   return status;
