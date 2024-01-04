@@ -14,7 +14,7 @@ RECEIVER_TARGET := $(BUILD_DIR)/receiver
 
 __dir := $(shell mkdir -p $(BUILD_DIR))
 
-DEBUG = -g
+DEBUG = -g -DLOG_LEVEL=1
 CFLAGS = -Wall -I$(INC_DIR) $(DEBUG)
 LDFLAGS = -lpthread -lm -lcrypto
 

@@ -3,6 +3,6 @@
 
 #define TABLE_SIZE 256
 #define CODE_LENGTH 6
-#define MAX_PAYLOAD_LEN 1024
+#define MAX_PAYLOAD_LEN 8192
 
 #endif  // _CONFIG_H
