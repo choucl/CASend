@@ -204,6 +204,9 @@ REQ_ERR_RET:
 
 static int bypass_packet(service_entry_t *entry, int sender_to_receiver,
                          int has_payload, int *transmit_finish) {
+  while (entry->receiver_fd == -1 || entry->receiver_fd == -1) {
+    asm("");
+  }
   int status = 0;
   long send_fd = (sender_to_receiver) ? entry->sender_fd : entry->receiver_fd;
   long recv_fd = (sender_to_receiver) ? entry->receiver_fd : entry->sender_fd;
