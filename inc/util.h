@@ -33,7 +33,6 @@ void prefixprintf(char *prefix, int fd, const char *format, ...);
 #define info(fd, ...)                       \
   do {                                      \
     prefixprintf("info:", fd, __VA_ARGS__); \
-    printf("log level: %d\n", LOG_LEVEL)\
   } while (0);
 #else
 #define info(fd, ...) asm("")
