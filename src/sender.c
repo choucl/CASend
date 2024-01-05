@@ -193,7 +193,7 @@ int send_data(int sender_fd, char *fname, char *pub_key, char sha256_str[65]) {
 
     // Send data header
     create_header(&header, kOpData, kData, seg_len);
-    status = send(sender_fd, header, HEADER_LENGTH, 0);
+    status = retry_send(sender_fd, header, HEADER_LENGTH, 0);
     free(header);
     if (status == -1) {
       error(sender_fd, "send data header failed");
@@ -204,24 +204,13 @@ int send_data(int sender_fd, char *fname, char *pub_key, char sha256_str[65]) {
 
     //  Send data paylaod
     create_payload(&payload, 0, seg_len, data_seg);
-    status = send(sender_fd, payload, GET_PAYLOAD_PACKET_LEN(seg_len), 0);
+    status = retry_send(sender_fd, payload, GET_PAYLOAD_PACKET_LEN(seg_len), 0);
     free(payload);
     if (status == -1) {
       error(sender_fd, "send data failed");
       return -1;
     } else {
       info(sender_fd, "send data success");
-    }
-    //  Receive ack
-    header = malloc(HEADER_LENGTH);
-    status = recv(sender_fd, header, HEADER_LENGTH, 0);
-    opcode_t opcode = get_opcode(header);
-    free(header);
-    if (status == -1 || opcode != kOpAck) {
-      error(sender_fd, "recv ack failed");
-      return -1;
-    } else {
-      info(sender_fd, "recv ack success");
     }
 
     if (last_seg) break;

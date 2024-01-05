@@ -156,7 +156,7 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname,
   while (1) {
     // Receive header
     header = malloc(HEADER_LENGTH);
-    status = recv(receiver_fd, header, HEADER_LENGTH, 0);
+    status = retry_recv(receiver_fd, header, HEADER_LENGTH, 0);
     opcode_t opcode = get_opcode(header);
     payload_type_t payload_type = get_payload_type(header);
     size_t seg_len = get_payload_length(header);
@@ -178,7 +178,7 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname,
     // Receive data
     char *data_seg;
     payload = malloc(payload_buf_len);
-    status = recv(receiver_fd, payload, payload_buf_len, 0);
+    status = retry_recv(receiver_fd, payload, payload_buf_len, 0);
     copy_payload(payload, &data_seg);
     free(payload);
     if (status == -1) {
@@ -192,17 +192,6 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname,
 
     fwrite(data_seg, sizeof(char), seg_len, dst_file);
     free(data_seg);
-
-    // Send ack
-    create_header(&header, kOpAck, kNone, 0);
-    status = send(receiver_fd, header, HEADER_LENGTH, 0);
-    free(header);
-    if (status == -1) {
-      error(receiver_fd, "send ack failed");
-      return -1;
-    } else {
-      info(receiver_fd, "send ack success");
-    }
   }
 
   SHA256_Final(hash, &sha256);
