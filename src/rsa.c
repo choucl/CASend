@@ -36,14 +36,11 @@ int generate_keys(char **pub_key, char **pri_key, size_t *pri_len,
   *pri_len = BIO_pending(pri);
   *pub_len = BIO_pending(pub);
 
-  *pri_key = malloc(*pri_len + 1);
-  *pub_key = malloc(*pub_len + 1);
+  *pri_key = malloc(*pri_len);
+  *pub_key = malloc(*pub_len);
 
   BIO_read(pri, *pri_key, *pri_len);
   BIO_read(pub, *pub_key, *pub_len);
-
-  (*pri_key)[*pri_len] = '\0';
-  (*pub_key)[*pub_len] = '\0';
 
   // Free the EVP_PKEY structure
   EVP_PKEY_free(pkey);
@@ -143,7 +140,6 @@ unsigned char *decrypt(char *pri_key, size_t pri_len,
     fprintf(stderr, "EVP_PKEY_decrypt 2");
     return NULL;
   }
-  out[outlen] = '\0';
 
   EVP_PKEY_free(pkey);
   return out;
