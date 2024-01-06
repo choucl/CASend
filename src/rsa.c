@@ -52,7 +52,7 @@ int generate_keys(char **pub_key, char **pri_key, size_t *pri_len,
 
 // Encrypt a message using a public key and return the ciphertext
 unsigned char *encrypt(char *pub_key, size_t pub_len, const unsigned char *msg,
-                       size_t *ctext_len) {
+                       size_t msg_len, size_t *ctext_len) {
   BIO *pub = BIO_new(BIO_s_mem());
   EVP_PKEY_CTX *ctx;
   unsigned char *out;
@@ -79,7 +79,7 @@ unsigned char *encrypt(char *pub_key, size_t pub_len, const unsigned char *msg,
   }
 
   /* Determine buffer length */
-  if (EVP_PKEY_encrypt(ctx, NULL, &outlen, msg, strlen((char *)msg)) <= 0) {
+  if (EVP_PKEY_encrypt(ctx, NULL, &outlen, msg, msg_len) <= 0) {
     fprintf(stderr, "EVP_PKEY_encrypt\n");
     return NULL;
   }
@@ -90,7 +90,7 @@ unsigned char *encrypt(char *pub_key, size_t pub_len, const unsigned char *msg,
     return NULL;
   }
 
-  if (EVP_PKEY_encrypt(ctx, out, &outlen, msg, strlen((char *)msg)) <= 0) {
+  if (EVP_PKEY_encrypt(ctx, out, &outlen, msg, msg_len) <= 0) {
     fprintf(stderr, "EVP_PKEY_encrypt\n");
     return NULL;
   }
