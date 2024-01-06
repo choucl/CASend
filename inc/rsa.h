@@ -15,17 +15,23 @@ int generate_keys(char **pub_key, char **pri_key, size_t *pri_len,
 
 // Encrypt a message using a public key and return the ciphertext
 // argumets:
-//   - ctext_len: buffer to get the ciphertext length
+//   - ptext_len: length of plain text
+//   - ctext_len: buffer to get the cipher text length
 // return value:
 //   - NULL: encryption failed
 //   - otherwise: ciphertext
-unsigned char *encrypt(char *pub_key, size_t pub_len, const unsigned char *msg,
-                       size_t msg_len, size_t *ctext_len);
+unsigned char *encrypt(char *pub_key, size_t pub_len,
+                       const unsigned char *ptext, size_t ptext_len,
+                       size_t *ctext_len);
 
 // Decrypt a ciphertext using a private key and return the plaintext
+// argumets:
+//   - ctext_len: length or cipher text
+//   - ptext_len: buffer to get the plain text length
 // return value:
 //   - NULL: decryption failed
 //   - otherwise: plaintext
 unsigned char *decrypt(char *pri_key, size_t pri_len,
-                       const unsigned char *ctext, size_t ctext_len);
+                       const unsigned char *ctext, size_t ctext_len,
+                       size_t *ptext_len);
 #endif
