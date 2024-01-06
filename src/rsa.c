@@ -36,14 +36,11 @@ int generate_keys(char **pub_key, char **pri_key, size_t *pri_len,
   *pri_len = BIO_pending(pri);
   *pub_len = BIO_pending(pub);
 
-  *pri_key = malloc(*pri_len + 1);
-  *pub_key = malloc(*pub_len + 1);
+  *pri_key = malloc(*pri_len);
+  *pub_key = malloc(*pub_len);
 
   BIO_read(pri, *pri_key, *pri_len);
   BIO_read(pub, *pub_key, *pub_len);
-
-  (*pri_key)[*pri_len] = '\0';
-  (*pub_key)[*pub_len] = '\0';
 
   // Free the EVP_PKEY structure
   EVP_PKEY_free(pkey);
@@ -51,7 +48,8 @@ int generate_keys(char **pub_key, char **pri_key, size_t *pri_len,
 }
 
 // Encrypt a message using a public key and return the ciphertext
-unsigned char *encrypt(char *pub_key, size_t pub_len, const unsigned char *msg,
+unsigned char *encrypt(char *pub_key, size_t pub_len,
+                       const unsigned char *ptext, size_t ptext_len,
                        size_t *ctext_len) {
   BIO *pub = BIO_new(BIO_s_mem());
   EVP_PKEY_CTX *ctx;
@@ -79,7 +77,7 @@ unsigned char *encrypt(char *pub_key, size_t pub_len, const unsigned char *msg,
   }
 
   /* Determine buffer length */
-  if (EVP_PKEY_encrypt(ctx, NULL, &outlen, msg, strlen((char *)msg)) <= 0) {
+  if (EVP_PKEY_encrypt(ctx, NULL, &outlen, ptext, ptext_len) <= 0) {
     fprintf(stderr, "EVP_PKEY_encrypt\n");
     return NULL;
   }
@@ -90,7 +88,7 @@ unsigned char *encrypt(char *pub_key, size_t pub_len, const unsigned char *msg,
     return NULL;
   }
 
-  if (EVP_PKEY_encrypt(ctx, out, &outlen, msg, strlen((char *)msg)) <= 0) {
+  if (EVP_PKEY_encrypt(ctx, out, &outlen, ptext, ptext_len) <= 0) {
     fprintf(stderr, "EVP_PKEY_encrypt\n");
     return NULL;
   }
@@ -102,11 +100,11 @@ unsigned char *encrypt(char *pub_key, size_t pub_len, const unsigned char *msg,
 
 // Decrypt a ciphertext using a private key and return the plaintext
 unsigned char *decrypt(char *pri_key, size_t pri_len,
-                       const unsigned char *ctext, size_t len) {
+                       const unsigned char *ctext, size_t ctext_len,
+                       size_t *ptext_len) {
   BIO *pri = BIO_new(BIO_s_mem());
   EVP_PKEY_CTX *ctx;
   unsigned char *out;
-  size_t outlen;
 
   BIO_write(pri, pri_key, pri_len);
   EVP_PKEY *pkey = PEM_read_bio_PrivateKey(pri, NULL, NULL, NULL);
@@ -130,20 +128,19 @@ unsigned char *decrypt(char *pri_key, size_t pri_len,
   }
 
   /* Determine buffer length */
-  if (EVP_PKEY_decrypt(ctx, NULL, &outlen, ctext, len) <= 0) {
+  if (EVP_PKEY_decrypt(ctx, NULL, ptext_len, ctext, ctext_len) <= 0) {
     fprintf(stderr, "EVP_PKEY_decrypt 1");
     return NULL;
   }
-  out = OPENSSL_malloc(outlen);
+  out = OPENSSL_malloc(*ptext_len);
   if (!out) {
     fprintf(stderr, "Error: malloc failure\n");
     return NULL;
   }
-  if (EVP_PKEY_decrypt(ctx, out, &outlen, ctext, len) <= 0) {
+  if (EVP_PKEY_decrypt(ctx, out, ptext_len, ctext, ctext_len) <= 0) {
     fprintf(stderr, "EVP_PKEY_decrypt 2");
     return NULL;
   }
-  out[outlen] = '\0';
 
   EVP_PKEY_free(pkey);
   return out;
