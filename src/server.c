@@ -61,7 +61,7 @@ static service_entry_t *create_table_entry(int clientfd, int code_length) {
 }
 
 static int send_intention_handler(service_entry_t **entry, long clientfd,
-                                  int name_length) {
+                                  int key_length) {
   int status = 0;
   info(clientfd, "received send intention");
   // receive pubkey payload
@@ -94,12 +94,11 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
   pthread_mutex_unlock(&mutex);
   info(clientfd, "entry creation complete, code = %d", (*entry)->code);
 
-  const int code_pubkey_length = 451;
   size_t cipher_code_len;
   // cipher
   unsigned char *cipher_code =
-      encrypt(sender_pubkey, code_pubkey_length,
-              (unsigned char *)&(*entry)->code, sizeof(int), &cipher_code_len);
+      encrypt(sender_pubkey, key_length, (unsigned char *)&(*entry)->code,
+              sizeof(int), &cipher_code_len);
 
   // send code header
   info(clientfd, "sending ack header");
@@ -126,6 +125,7 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
     error(clientfd, "recv name header failed");
     goto SEND_INTENTION_RET;
   }
+  int name_length = get_payload_length(recv_name_header);
   free(recv_name_header);
 
   // receive name payload
