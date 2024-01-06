@@ -20,7 +20,7 @@ int generate_keys(char **pub_key, char **pri_key, size_t *pri_len,
 //   - NULL: encryption failed
 //   - otherwise: ciphertext
 unsigned char *encrypt(char *pub_key, size_t pub_len, const unsigned char *msg,
-                       size_t *ctext_len);
+                       size_t msg_len, size_t *ctext_len);
 
 // Decrypt a ciphertext using a private key and return the plaintext
 // return value:
