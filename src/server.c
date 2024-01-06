@@ -99,7 +99,7 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
   // cipher
   unsigned char *cipher_code =
       encrypt(sender_pubkey, code_pubkey_length,
-              (unsigned char *)&(*entry)->code, &cipher_code_len);
+              (unsigned char *)&(*entry)->code, sizeof(int), &cipher_code_len);
 
   // send code header
   info(clientfd, "sending ack header");
