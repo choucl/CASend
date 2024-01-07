@@ -6,8 +6,11 @@
 void prefixprintf(char *prefix, int fd, const char *format, ...) {
   va_list args;
   va_start(args, format);
-  fprintf(stderr, "%-10s (fd = %d) ", prefix, fd);
+  fprintf(stderr, "%-6s ", prefix);
   vfprintf(stderr, format, args);
-  printf("\n");
+  if (fd == 0)
+    printf("\n");
+  else
+    printf(" (fd=%d)\n", fd);
   va_end(args);
 }

@@ -1,3 +1,4 @@
+#include <getopt.h>
 #include <math.h>
 #include <netinet/in.h>
 #include <pthread.h>
@@ -23,6 +24,7 @@ typedef struct service_entry service_entry_t;
 struct service_entry {
   int code;  // generated code
   int name_length;
+  int encryption_transmission;
   long sender_fd;
   long receiver_fd;
   char *name;
@@ -65,7 +67,7 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
   int status = 0;
   info(clientfd, "received send intention");
   // receive pubkey payload
-  int key_payload_length = GET_PAYLOAD_PACKET_LEN(64);
+  int key_payload_length = GET_PAYLOAD_PACKET_LEN(key_length);
   packet_payload_t recv_pubkey_payload = malloc(key_payload_length);
   status = recv(clientfd, recv_pubkey_payload, key_payload_length, 0);
   if (status == -1) {
@@ -77,7 +79,7 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
     error(clientfd, "parsing sender public key failed");
     goto SEND_INTENTION_RET;
   }
-  info(clientfd, "received sender public key");
+  debug(clientfd, "received sender public key");
 
   if (occupy_count == TABLE_SIZE) {
     warning(clientfd, "no vacancy, try again later");
@@ -92,23 +94,29 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
   pthread_mutex_lock(&mutex);
   *entry = create_table_entry(clientfd, CODE_LENGTH);
   pthread_mutex_unlock(&mutex);
-  info(clientfd, "entry creation complete, code = %d", (*entry)->code);
+  debug(clientfd, "entry creation complete, code = %d", (*entry)->code);
 
   size_t cipher_code_len;
-  // cipher
-  unsigned char *cipher_code =
-      encrypt(sender_pubkey, key_length, (unsigned char *)&(*entry)->code,
-              sizeof(int), &cipher_code_len);
+  unsigned char *cipher_code;
+  if (key_length > 0) {
+    // encryption
+    cipher_code =
+        encrypt(sender_pubkey, key_length, (unsigned char *)&(*entry)->code,
+                sizeof(int), &cipher_code_len);
+  } else {
+    cipher_code = (unsigned char *)&(*entry)->code;
+    cipher_code_len = sizeof(int);
+  }
 
   // send code header
-  info(clientfd, "sending ack header");
+  debug(clientfd, "sending ack header");
   packet_header_t send_ack_header;
   create_header(&send_ack_header, kOpAck, kCode, cipher_code_len);
   send(clientfd, send_ack_header, HEADER_LENGTH, 0);
   free(send_ack_header);
 
   // send code payload
-  info(clientfd, "sending code payload");
+  debug(clientfd, "sending code payload");
   packet_payload_t send_code_payload;
   int payload_size = create_payload(&send_code_payload, 0, cipher_code_len,
                                     (char *)cipher_code);
@@ -141,7 +149,7 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
     error(clientfd, "parsing name failed");
     goto SEND_INTENTION_RET;
   }
-  info(clientfd, "name payload received - %s", name);
+  debug(clientfd, "name payload received - %s", name);
   (*entry)->name = name;
   (*entry)->name_length = name_length;
   free(recv_name_payload);
@@ -164,7 +172,7 @@ static int receiver_request_handler(service_entry_t **entry, long clientfd) {
   }
   int *recv_code;
   copy_payload(recv_code_payload, (char **)&recv_code);
-  info(clientfd, "recv code payload = %d", *recv_code);
+  debug(clientfd, "recv code payload = %d", *recv_code);
 
   *entry = service_table[(*recv_code) % TABLE_SIZE];
   packet_header_t send_ack_header;
@@ -261,6 +269,7 @@ static int pubkey_transmission_handler(service_entry_t *entry) {
 int data_transmission_handler(service_entry_t *entry) {
   int status = 0;
   int is_finish = 0;
+  info(entry->sender_fd, "start sending data");
   while (1) {
     // data
     status = bypass_packet(entry, 1, 1, &is_finish);
@@ -281,16 +290,11 @@ int data_transmission_handler(service_entry_t *entry) {
   return status;
 }
 
-static void die(char *msg) {
-  printf("%s\n", msg);
-  exit(-1);
-}
-
 static void *serve(void *argp) {
   long clientfd = (long)argp;
   // do something
   int status = 0;
-  packet_header_t recv_header = malloc(HEADER_LENGTH + 1);
+  packet_header_t recv_header = malloc(HEADER_LENGTH);
   status = recv(clientfd, recv_header, HEADER_LENGTH, 0);
   if (status <= 0) {
     error(clientfd, "invalid packet header");
@@ -342,7 +346,7 @@ static void *serve(void *argp) {
       error(clientfd, "handle receive intention failed");
       return 0;
     }
-    info(clientfd, "receiver request update successfully");
+    debug(clientfd, "receiver request update successfully");
   } else {  // invalid situation
     error(clientfd, "invalid header opcode: %d", get_opcode(recv_header));
     return 0;
@@ -351,31 +355,39 @@ static void *serve(void *argp) {
   return 0;
 }
 
+static void help() {
+  printf("%-12s %-16s %-20s\n", "-h", "--help", "show this message");
+  printf("%-12s %-16s %-20s\n", "-p [port]", "--port [port]",
+         "specify server port");
+}
+
 int main(int argc, char *argv[]) {
   char *server_port = NULL;
-  --argc;
-  ++argv;
-  if (argc > 0 && **argv == '-' && (*argv)[1] == 'p') {
-    --argc;
-    ++argv;
-    if (argc < 1) die("error: No port number provided\n");
-
-    server_port = malloc(strlen(*argv) + 1);
-    strncpy(server_port, *argv, strlen(*argv));
-    --argc;
-    ++argv;
-
-    if (argc > 0) die("error: too many arguments");
-  } else {
-    die("usage: servr -p server_port\n");
+  const char optstr[] = "hp:";
+  const static struct option long_options[] = {
+      {"help", no_argument, 0, 'h'}, {"port", required_argument, 0, 'p'}};
+  while (1) {
+    int c = getopt_long(argc, argv, optstr, long_options, NULL);
+    if (c == -1) break;
+    switch (c) {
+      case 'h':
+        printf("CASend Server\n");
+        help();
+        return 0;
+      case 'p':
+        server_port = argv[optind - 1];
+        break;
+      default:
+        help();
+        return -1;
+    }
   }
 
   int listenfd __attribute__((unused)) = open_listenfd(server_port);
   if (listenfd == -1) {
-    printf("error: Unable to open with port: %s\n", server_port);
-    return -1;
+    fatal(0, "Unable to open server port: %s", server_port);
   }
-  printf("listening on the port %s\n", server_port);
+  info(0, "listening on the port %s", server_port);
 
   pthread_mutex_init(&mutex, NULL);
   for (int i = 0; i < TABLE_SIZE; ++i) {
