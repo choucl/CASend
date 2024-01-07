@@ -11,6 +11,16 @@
 #include "packet.h"
 #include "sock.h"
 #include "util.h"
+#include "rsa.h"
+
+void print_raw(unsigned char *str, size_t len) {
+  for (int i = 0; i < len; i++) {
+    printf("%02x", *(str + i));
+    if ((i + 1) % 16 == 0)
+      printf("\n");
+  }
+  printf("\n");
+}
 
 int send_intention(int sender_fd, char fname_pub_key[64]) {
   packet_header_t header;
@@ -23,8 +33,6 @@ int send_intention(int sender_fd, char fname_pub_key[64]) {
   if (status == -1) {
     error(sender_fd, "request failed");
     return -1;
-  } else {
-    info(sender_fd, "request success");
   }
 
   // send file name public key
@@ -35,9 +43,8 @@ int send_intention(int sender_fd, char fname_pub_key[64]) {
   if (status == -1) {
     error(sender_fd, "send file name public key failed");
     return -1;
-  } else {
-    info(sender_fd, "send file name public key success: %s", fname_pub_key);
   }
+
   return 0;
 }
 
@@ -54,8 +61,6 @@ int recv_code(int sender_fd, int *code) {
   if (status == -1 || opcode != kOpAck || payload_type != kCode) {
     error(sender_fd, "recv ack failed");
     return -1;
-  } else {
-    info(sender_fd, "recv ack success");
   }
 
   // receive code
@@ -67,9 +72,11 @@ int recv_code(int sender_fd, int *code) {
   if (status == -1) {
     error(sender_fd, "recv code failed");
     return -1;
-  } else {
-    info(sender_fd, "recv code success: %d", *code);
   }
+
+  printf("[Info] Got code %d\n", *code);
+  free(code);
+
   return 0;
 }
 
@@ -85,8 +92,6 @@ int send_fname(int sender_fd, char *fname) {
   if (status == -1) {
     error(sender_fd, "send file name header failed");
     return -1;
-  } else {
-    info(sender_fd, "send file name header success");
   }
 
   // send file name
@@ -96,9 +101,8 @@ int send_fname(int sender_fd, char *fname) {
   if (status == -1) {
     error(sender_fd, "send file name failed");
     return -1;
-  } else {
-    info(sender_fd, "send file name success: %s", fname);
   }
+
   return 0;
 }
 
@@ -123,25 +127,22 @@ int receive_pub_key(int sender_fd, char *fname, char **pub_key) {
   status = recv(sender_fd, header, HEADER_LENGTH, 0);
   opcode_t opcode = get_opcode(header);
   payload_type_t payload_type = get_payload_type(header);
+  size_t key_ken = get_payload_length(header);
   free(header);
   if (status == -1 || opcode != kOpPub || payload_type != kPubKey) {
     error(sender_fd, "recv public key header failed");
     return -1;
-  } else {
-    info(sender_fd, "recv public key header success");
   }
 
   // recv public key
-  packet_payload_t payload = malloc(GET_PAYLOAD_PACKET_LEN(64));
-  status = recv(sender_fd, payload, GET_PAYLOAD_PACKET_LEN(64), 0);
+  packet_payload_t payload = malloc(GET_PAYLOAD_PACKET_LEN(key_ken));
+  status = recv(sender_fd, payload, GET_PAYLOAD_PACKET_LEN(key_ken), 0);
 
   copy_payload(payload, pub_key);
   free(payload);
   if (status == -1) {
     error(sender_fd, "recv public key failed");
     return -1;
-  } else {
-    info(sender_fd, "recv public key success: %s", *pub_key);
   }
 
   // ack public key
@@ -151,8 +152,6 @@ int receive_pub_key(int sender_fd, char *fname, char **pub_key) {
   if (status == -1) {
     error(sender_fd, "ack public key failed");
     return -1;
-  } else {
-    info(sender_fd, "ack public key success");
   }
 
   return 0;
@@ -165,16 +164,16 @@ int send_data(int sender_fd, char *fname, char *pub_key, char sha256_str[65]) {
   if (src_file == NULL) {
     error(sender_fd, "Error: can not open file %s", fname);
     return 1;
-  } else {
-    info(sender_fd, "Open file %s successfully", fname);
   }
 
   int status;
 
-  size_t max_len = MAX_PAYLOAD_LEN;
-  size_t seg_len;
-  char *data_seg = malloc(max_len * sizeof(char));
-  int last_seg = 0;
+
+  size_t ptext_len;
+  size_t ptext_chunk_len = 128;
+  size_t max_ptext_len = (MAX_PAYLOAD_LEN / 256) * ptext_chunk_len;
+
+  int finish_send = 0;
 
   unsigned char hash[SHA256_DIGEST_LENGTH];
   SHA256_CTX sha256;
@@ -183,13 +182,51 @@ int send_data(int sender_fd, char *fname, char *pub_key, char sha256_str[65]) {
   packet_header_t header;
   packet_payload_t payload;
   // Read data & send
+  char ptext[max_ptext_len];
+
+  int send_time = 0;
+
   while (1) {
-    seg_len = fread(data_seg, sizeof(char), max_len, src_file);
-    if (seg_len < max_len) {
-      last_seg = 1;
+
+    //char *ptext = malloc(max_ptext_len * sizeof(char));
+    ptext_len = fread(ptext, sizeof(char), max_ptext_len, src_file);
+    //info(sender_fd, "ptext(%zu): %s", ptext_len, ptext);
+    //printf("send time %d, ptext len %zu\n", send_time++, ptext_len);
+    SHA256_Update(&sha256, ptext, ptext_len);
+    size_t last_chunk_len = 0;
+    if (ptext_len < max_ptext_len) {
+      last_chunk_len = ptext_len % ptext_chunk_len;
+      info(sender_fd, "last_chunk_len %zu bytes", last_chunk_len);
+      //memset(ptext + ptext_len, 0, pad_len); // padding
+      //ptext_len += pad_len;
+      finish_send = 1;
     }
 
-    SHA256_Update(&sha256, data_seg, seg_len);
+    // Encrypt data
+    size_t ctext_len = 0;
+    char *ctext = malloc(MAX_PAYLOAD_LEN * sizeof(char));
+
+    char ptext_chunk[ptext_chunk_len];
+    size_t pub_len = 451;
+    int iter = (ptext_len / ptext_chunk_len) + finish_send;
+
+    for (int i = 0; i < iter; i++) {
+      size_t chunk_offset = ptext_chunk_len * i;
+
+      if (finish_send == 1 && i == iter - 1)
+        ptext_chunk_len = last_chunk_len;
+
+      memcpy(ptext_chunk, ptext + chunk_offset, ptext_chunk_len);
+
+      size_t ctext_chunk_len;
+      unsigned char *ctext_chunk = encrypt(pub_key, pub_len, (const unsigned char*)ptext_chunk, &ctext_chunk_len, ptext_chunk_len);
+      memcpy(ctext + ctext_len, ctext_chunk, ctext_chunk_len);
+      if (ctext_chunk_len != 256) {
+        info(sender_fd, "ctext chunk len != 256");
+      }
+      ctext_len += ctext_chunk_len;
+    }
+
 
     // Send data header
     create_header(&header, kOpData, kData, seg_len);
@@ -198,22 +235,19 @@ int send_data(int sender_fd, char *fname, char *pub_key, char sha256_str[65]) {
     if (status == -1) {
       error(sender_fd, "send data header failed");
       return -1;
-    } else {
-      info(sender_fd, "send data header success");
     }
 
     //  Send data paylaod
     create_payload(&payload, 0, seg_len, data_seg);
     status = retry_send(sender_fd, payload, GET_PAYLOAD_PACKET_LEN(seg_len), 0);
     free(payload);
+    free(ctext);
     if (status == -1) {
       error(sender_fd, "send data failed");
       return -1;
-    } else {
-      info(sender_fd, "send data success");
     }
 
-    if (last_seg) break;
+    if (finish_send) break;
   }
 
   SHA256_Final(hash, &sha256);
@@ -232,8 +266,6 @@ int send_data(int sender_fd, char *fname, char *pub_key, char sha256_str[65]) {
   if (status == -1) {
     error(sender_fd, "send sha256 header failed");
     return -1;
-  } else {
-    info(sender_fd, "send sha256 header sending success");
   }
 
   // Send sha256 payload
@@ -244,8 +276,6 @@ int send_data(int sender_fd, char *fname, char *pub_key, char sha256_str[65]) {
   if (status == -1) {
     error(sender_fd, "send sha256 failed");
     return -1;
-  } else {
-    info(sender_fd, "send sha256 success");
   }
 
   // Receive finish ack
@@ -256,8 +286,6 @@ int send_data(int sender_fd, char *fname, char *pub_key, char sha256_str[65]) {
   if (status == -1 || opcode != kOpAck) {
     error(sender_fd, "finish failed");
     return -1;
-  } else {
-    info(sender_fd, "finish success");
   }
 
   return 0;
@@ -320,23 +348,30 @@ int main(int argc, char *argv[]) {
   // Main process
   int status = 0;
 
+  printf("[Info] Register new file transfer\n");
   status = register_new_transfer(sender_fd, fname);
-
-  if (status == -1) return -1;
+  if (status == -1)
+    return -1;
 
   char *pub_key;
+  printf("[Info] Waiting for receiver...\n");
   status = receive_pub_key(sender_fd, fname, &pub_key);
 
-  if (status == -1) return -1;
+  if (status == -1)
+    return -1;
 
-  info(sender_fd, "Get public key: %s", pub_key);
+  printf("Get public key: %s", pub_key);
 
   char sha256_str[65];
 
+  printf("[Info] Start file transfer %s\n", fname);
   send_data(sender_fd, fname, pub_key, sha256_str);
   info(sender_fd, "sha256: %s", sha256_str);
 
-  if (status == -1) return -1;
+  if (status == -1)
+    return -1;
+
+  printf("[Info] Finish file transfer %s\n", fname);
 
   return 0;
 }
