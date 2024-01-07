@@ -221,16 +221,17 @@ static int bypass_packet(service_entry_t *entry, int sender_to_receiver,
   if (transmit_finish != NULL) {
     *transmit_finish = (get_opcode(data_header) == kOpFin);
   }
+  int payload_len = get_payload_length(data_header);
 
   if (has_payload) {
-    int payload_buf_len = GET_PAYLOAD_PACKET_LEN(MAX_PAYLOAD_LEN);
+    int payload_buf_len = GET_PAYLOAD_PACKET_LEN(payload_len);
     packet_payload_t payload_buffer = entry->payload_buffer;
-    int payload_len = recv(send_fd, payload_buffer, payload_buf_len, 0);
+    int payload_len = retry_recv(send_fd, payload_buffer, payload_buf_len, 0);
     if ((status = payload_len) <= 0) {
       error(send_fd, "fail receiving data payload");
       goto BYPASS_RET;
     }
-    status = send(recv_fd, payload_buffer, payload_len, 0);
+    status = retry_send(recv_fd, payload_buffer, payload_len, 0);
   }
 BYPASS_RET:
   if (status <= 0) {
@@ -268,13 +269,12 @@ int data_transmission_handler(service_entry_t *entry) {
       break;
     }
     // ack
-    status = bypass_packet(entry, 0, 0, NULL);
-    if (status <= 0) {
-      error(entry->receiver_fd, "ack transmission failed");
-      break;
-    }
     if (is_finish) {
       info(entry->sender_fd, "data transmission finished");
+      status = bypass_packet(entry, 0, 0, NULL);
+      if (status <= 0) {
+        error(entry->receiver_fd, "ack transmission failed");
+      }
       break;
     }
   }
