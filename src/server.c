@@ -12,6 +12,7 @@
 
 #include "config.h"
 #include "packet.h"
+#include "rsa.h"
 #include "sock.h"
 #include "util.h"
 
@@ -59,13 +60,8 @@ static service_entry_t *create_table_entry(int clientfd, int code_length) {
   return new_entry;
 }
 
-static int encrypt_code(int code) {
-  // TODO: encrypt function
-  return 0;
-}
-
 static int send_intention_handler(service_entry_t **entry, long clientfd,
-                                  int name_length) {
+                                  int key_length) {
   int status = 0;
   info(clientfd, "received send intention");
   // receive pubkey payload
@@ -98,21 +94,24 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
   pthread_mutex_unlock(&mutex);
   info(clientfd, "entry creation complete, code = %d", (*entry)->code);
 
-  // TODO: encrypt code here
-  encrypt_code((*entry)->code);
+  size_t cipher_code_len;
+  // cipher
+  unsigned char *cipher_code =
+      encrypt(sender_pubkey, key_length, (unsigned char *)&(*entry)->code,
+              sizeof(int), &cipher_code_len);
 
   // send code header
   info(clientfd, "sending ack header");
   packet_header_t send_ack_header;
-  create_header(&send_ack_header, kOpAck, kCode, sizeof(const int));
+  create_header(&send_ack_header, kOpAck, kCode, cipher_code_len);
   send(clientfd, send_ack_header, HEADER_LENGTH, 0);
   free(send_ack_header);
 
   // send code payload
   info(clientfd, "sending code payload");
   packet_payload_t send_code_payload;
-  int payload_size = create_payload(&send_code_payload, 0, sizeof(const int),
-                                    (char *)&(*entry)->code);
+  int payload_size = create_payload(&send_code_payload, 0, cipher_code_len,
+                                    (char *)cipher_code);
   if ((status = payload_size) <= 0) {
     error(clientfd, "fail creating code payload");
     goto SEND_INTENTION_RET;
@@ -126,6 +125,7 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
     error(clientfd, "recv name header failed");
     goto SEND_INTENTION_RET;
   }
+  int name_length = get_payload_length(recv_name_header);
   free(recv_name_header);
 
   // receive name payload

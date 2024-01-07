@@ -14,7 +14,7 @@ RECEIVER_TARGET := $(BUILD_DIR)/receiver
 
 __dir := $(shell mkdir -p $(BUILD_DIR))
 
-DEBUG = -g -DLOG_LEVEL=1
+DEBUG = -g -DLOG_LEVEL=3
 CFLAGS = -Wall -I$(INC_DIR) $(DEBUG)
 LDFLAGS = -lpthread -lm -lcrypto
 
@@ -22,7 +22,7 @@ LDFLAGS = -lpthread -lm -lcrypto
 
 all: $(OBJECTS) $(SERVER_TARGET) $(SENDER_TARGET) $(RECEIVER_TARGET)
 
-$(SERVER_TARGET): $(addprefix $(BUILD_DIR)/, server.o sock.o packet.o util.o)
+$(SERVER_TARGET): $(addprefix $(BUILD_DIR)/, server.o sock.o packet.o util.o rsa.o)
 	@echo [LINK] $@
 	@$(CC) -o $@ $^ $(LDFLAGS)
 
