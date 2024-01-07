@@ -126,7 +126,8 @@ int register_new_transfer(int sender_fd, char *fname, char *pub_key,
   return 0;
 }
 
-int receive_pub_key(int sender_fd, char *fname, char **pub_key) {
+int receive_pub_key(int sender_fd, char *fname, char **pub_key,
+                    size_t *pub_len) {
   info(sender_fd, "receive pub key");
   int status;
   // recv public key header
@@ -135,7 +136,7 @@ int receive_pub_key(int sender_fd, char *fname, char **pub_key) {
   status = recv(sender_fd, header, HEADER_LENGTH, 0);
   opcode_t opcode = get_opcode(header);
   payload_type_t payload_type = get_payload_type(header);
-  size_t key_ken = get_payload_length(header);
+  *pub_len = get_payload_length(header);
   free(header);
   if (status == -1 || opcode != kOpPub || payload_type != kPubKey) {
     error(sender_fd, "recv public key header failed");
@@ -144,8 +145,8 @@ int receive_pub_key(int sender_fd, char *fname, char **pub_key) {
 
   // recv public key
   debug(sender_fd, "recv data public key");
-  packet_payload_t payload = malloc(GET_PAYLOAD_PACKET_LEN(key_ken));
-  status = recv(sender_fd, payload, GET_PAYLOAD_PACKET_LEN(key_ken), 0);
+  packet_payload_t payload = malloc(GET_PAYLOAD_PACKET_LEN(*pub_len));
+  status = recv(sender_fd, payload, GET_PAYLOAD_PACKET_LEN(*pub_len), 0);
 
   copy_payload(payload, pub_key);
   free(payload);
@@ -167,7 +168,8 @@ int receive_pub_key(int sender_fd, char *fname, char **pub_key) {
   return 0;
 }
 
-int send_data(int sender_fd, char *fname, char *pub_key, char sha256_str[65]) {
+int send_data(int sender_fd, char *fname, char *pub_key, size_t pub_len,
+              char sha256_str[65]) {
   FILE *src_file;
   src_file = fopen(fname, "rb");
 
@@ -209,7 +211,6 @@ int send_data(int sender_fd, char *fname, char *pub_key, char sha256_str[65]) {
     char *ctext = malloc(MAX_PAYLOAD_LEN * sizeof(char));
 
     char ptext_chunk[ptext_chunk_len];
-    size_t pub_len = 451;
     int iter = (ptext_len / ptext_chunk_len) + finish_send;
 
     for (int i = 0; i < iter; i++) {
@@ -363,15 +364,15 @@ int main(int argc, char *argv[]) {
   if (status == -1) return -1;
 
   char *data_pub_key;
+  size_t data_pub_len;
   printf("[Info] Waiting for receiver...\n");
-  status = receive_pub_key(sender_fd, fname, &data_pub_key);
-
+  status = receive_pub_key(sender_fd, fname, &data_pub_key, &data_pub_len);
   if (status == -1) return -1;
 
   char sha256_str[65];
 
   printf("[Info] Start file transfer %s\n", fname);
-  send_data(sender_fd, fname, data_pub_key, sha256_str);
+  send_data(sender_fd, fname, data_pub_key, data_pub_len, sha256_str);
   debug(sender_fd, "sha256: %s", sha256_str);
 
   if (status == -1) return -1;

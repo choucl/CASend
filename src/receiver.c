@@ -78,7 +78,7 @@ int recv_fname(int receiver_fd, char **fname) {
   return 0;
 }
 
-int send_pub_key(int receiver_fd, char *pub_key) {
+int send_pub_key(int receiver_fd, char *pub_key, size_t pub_len) {
   info(receiver_fd, "send pub key");
   packet_header_t header;
   packet_payload_t payload;
@@ -86,8 +86,7 @@ int send_pub_key(int receiver_fd, char *pub_key) {
 
   // send public key header
   debug(receiver_fd, "send public key header");
-  size_t key_len = strlen(pub_key);
-  create_header(&header, kOpPub, kPubKey, key_len * sizeof(char));
+  create_header(&header, kOpPub, kPubKey, pub_len);
   status = send(receiver_fd, header, HEADER_LENGTH, 0);
   free(header);
   if (status == -1) {
@@ -97,8 +96,8 @@ int send_pub_key(int receiver_fd, char *pub_key) {
 
   // send public key
   debug(receiver_fd, "send public key");
-  create_payload(&payload, 0, key_len, pub_key);
-  status = send(receiver_fd, payload, GET_PAYLOAD_PACKET_LEN(key_len), 0);
+  create_payload(&payload, 0, pub_len, pub_key);
+  status = send(receiver_fd, payload, GET_PAYLOAD_PACKET_LEN(pub_len), 0);
   free(payload);
   if (status == -1) {
     error(receiver_fd, "send public key failed");
@@ -120,13 +119,13 @@ int send_pub_key(int receiver_fd, char *pub_key) {
 }
 
 int request_transfer(int receiver_fd, char *input_code, char **fname,
-                     char *pub_key) {
+                     char *pub_key, size_t pub_len) {
   int status = 0;
   status = recv_intention(receiver_fd, input_code);
   if (status == -1) return -1;
   status = recv_fname(receiver_fd, fname);
   if (status == -1) return -1;
-  status = send_pub_key(receiver_fd, pub_key);
+  status = send_pub_key(receiver_fd, pub_key, pub_len);
   if (status == -1) return -1;
 
   return 0;
@@ -329,7 +328,7 @@ int main(int argc, char *argv[]) {
   generate_keys(&pub_key, &pri_key, &pri_len, &pub_len);
 
   printf("[Info] Request file transfer: %s\n", input_code);
-  status = request_transfer(receiver_fd, input_code, &fname, pub_key);
+  status = request_transfer(receiver_fd, input_code, &fname, pub_key, pub_len);
 
   if (status == -1) return status;
 
