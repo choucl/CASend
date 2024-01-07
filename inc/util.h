@@ -1,9 +1,23 @@
 #ifndef _UTIL_H
 #define _UTIL_H
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 void prefixprintf(char *prefix, int fd, const char *format, ...);
+
+#define prompt(fd, ...)                  \
+  do {                                   \
+    prefixprintf("::", fd, __VA_ARGS__); \
+  } while (0);
+
+#if DEBUG
+#define debug(fd, ...)                       \
+  do {                                       \
+    prefixprintf("debug:", fd, __VA_ARGS__); \
+  } while (0);
+#else
+#define debug(fd, ...) asm("")
+#endif
 
 #define fatal(fd, ...)                       \
   do {                                       \
@@ -11,7 +25,7 @@ void prefixprintf(char *prefix, int fd, const char *format, ...);
     exit(-1);                                \
   } while (0);
 
-#if LOG_LEVEL >= 1
+#if QUIET < 3
 #define error(fd, ...)                       \
   do {                                       \
     prefixprintf("error:", fd, __VA_ARGS__); \
@@ -20,7 +34,7 @@ void prefixprintf(char *prefix, int fd, const char *format, ...);
 #define error(fd, ...) asm("")
 #endif
 
-#if LOG_LEVEL >= 2
+#if QUIET < 2
 #define warning(fd, ...)                       \
   do {                                         \
     prefixprintf("warning:", fd, __VA_ARGS__); \
@@ -29,22 +43,13 @@ void prefixprintf(char *prefix, int fd, const char *format, ...);
 #define warning(fd, ...) asm("")
 #endif
 
-#if LOG_LEVEL >= 3
+#if QUIET < 1
 #define info(fd, ...)                       \
   do {                                      \
     prefixprintf("info:", fd, __VA_ARGS__); \
   } while (0);
 #else
 #define info(fd, ...) asm("")
-#endif
-
-#if LOG_LEVEL >= 3
-#define prompt(fd, ...)                  \
-  do {                                   \
-    prefixprintf("::", fd, __VA_ARGS__); \
-  } while (0);
-#else
-#define prompt(fd, ...) asm("")
 #endif
 
 #endif  // _UTIL_H
