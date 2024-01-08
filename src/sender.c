@@ -15,7 +15,7 @@
 #include "util.h"
 
 int send_intention(int sender_fd, char *pub_key, size_t pub_len) {
-  info(sender_fd, "Send intention");
+  debug(sender_fd, "Send intention");
   packet_header_t header;
   packet_payload_t payload;
   int status;
@@ -44,7 +44,7 @@ int send_intention(int sender_fd, char *pub_key, size_t pub_len) {
 }
 
 int recv_code(int sender_fd, int *code, char *pri_key, size_t pri_len) {
-  info(sender_fd, "Receive code");
+  debug(sender_fd, "Receive code");
   packet_header_t header;
   packet_payload_t payload;
   int status;
@@ -87,13 +87,13 @@ int recv_code(int sender_fd, int *code, char *pri_key, size_t pri_len) {
 }
 
 int send_fname(int sender_fd, char *fname) {
-  info(sender_fd, "Send file name");
+  debug(sender_fd, "Send file name");
   packet_header_t header;
   packet_payload_t payload;
   int status;
   // send file name header
   debug(sender_fd, "Send file name header");
-  size_t name_length = strlen(fname);
+  size_t name_length = strlen(fname) + 1;
   create_header(&header, kOpData, kData, name_length);
   status = send(sender_fd, header, HEADER_LENGTH, 0);
   free(header);
@@ -130,7 +130,7 @@ int register_new_transfer(int sender_fd, char *fname, char *pub_key,
 
 int receive_pub_key(int sender_fd, char *fname, char **pub_key,
                     size_t *pub_len) {
-  info(sender_fd, "Receive pub key");
+  debug(sender_fd, "Receive pub key");
   int status;
   // recv public key header
   debug(sender_fd, "Receive data public key header");
@@ -197,7 +197,7 @@ int send_data(int sender_fd, char *fname, char *pub_key, size_t pub_len,
   // Read data & send
   char ptext[max_ptext_len];
 
-  info(sender_fd, "Start file transfer");
+  debug(sender_fd, "Start file transfer");
 
   while (1) {
     ptext_len = fread(ptext, sizeof(char), max_ptext_len, src_file);
@@ -260,7 +260,7 @@ int send_data(int sender_fd, char *fname, char *pub_key, size_t pub_len,
   }
 
   // End of data transfer
-  info(sender_fd, "Finish sending file");
+  debug(sender_fd, "Finish sending file");
   fclose(src_file);
 
   // Send sha256 header
@@ -357,7 +357,7 @@ int main(int argc, char *argv[]) {
     port[strlen(port) - 1] = '\0';
     prompt(0, "Please specify file name to transfer");
     printf("-> ");
-    fname = malloc(sizeof(char) * 6);
+    fname = malloc(sizeof(char) * 32);
     fname = fgets(fname, 32, stdin);
     fname[strlen(fname) - 1] = '\0';
   }
@@ -409,8 +409,10 @@ int main(int argc, char *argv[]) {
 
   info(sender_fd, "Finish file transfer %s", fname);
 
-  free0(host);
-  free0(port);
-  free0(fname);
+  if (interactive) {
+    free0(host);
+    free0(port);
+    free0(fname);
+  }
   return 0;
 }
