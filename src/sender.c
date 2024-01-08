@@ -1,3 +1,4 @@
+#include <getopt.h>
 #include <netinet/in.h>
 #include <openssl/sha.h>
 #include <stdio.h>
@@ -14,7 +15,7 @@
 #include "util.h"
 
 int send_intention(int sender_fd, char *pub_key, size_t pub_len) {
-  info(sender_fd, "Send intention");
+  debug(sender_fd, "Send intention");
   packet_header_t header;
   packet_payload_t payload;
   int status;
@@ -43,7 +44,7 @@ int send_intention(int sender_fd, char *pub_key, size_t pub_len) {
 }
 
 int recv_code(int sender_fd, int *code, char *pri_key, size_t pri_len) {
-  info(sender_fd, "Receive code");
+  debug(sender_fd, "Receive code");
   packet_header_t header;
   packet_payload_t payload;
   int status;
@@ -86,13 +87,13 @@ int recv_code(int sender_fd, int *code, char *pri_key, size_t pri_len) {
 }
 
 int send_fname(int sender_fd, char *fname) {
-  info(sender_fd, "Send file name");
+  debug(sender_fd, "Send file name");
   packet_header_t header;
   packet_payload_t payload;
   int status;
   // send file name header
   debug(sender_fd, "Send file name header");
-  size_t name_length = strlen(fname);
+  size_t name_length = strlen(fname) + 1;
   create_header(&header, kOpData, kData, name_length);
   status = send(sender_fd, header, HEADER_LENGTH, 0);
   free(header);
@@ -129,7 +130,7 @@ int register_new_transfer(int sender_fd, char *fname, char *pub_key,
 
 int receive_pub_key(int sender_fd, char *fname, char **pub_key,
                     size_t *pub_len) {
-  info(sender_fd, "Receive pub key");
+  debug(sender_fd, "Receive pub key");
   int status;
   // recv public key header
   debug(sender_fd, "Receive data public key header");
@@ -196,7 +197,7 @@ int send_data(int sender_fd, char *fname, char *pub_key, size_t pub_len,
   // Read data & send
   char ptext[max_ptext_len];
 
-  info(sender_fd, "Start file transfer");
+  debug(sender_fd, "Start file transfer");
 
   while (1) {
     ptext_len = fread(ptext, sizeof(char), max_ptext_len, src_file);
@@ -259,7 +260,7 @@ int send_data(int sender_fd, char *fname, char *pub_key, size_t pub_len,
   }
 
   // End of data transfer
-  info(sender_fd, "Finish sending file");
+  debug(sender_fd, "Finish sending file");
   fclose(src_file);
 
   // Send sha256 header
@@ -297,57 +298,91 @@ int send_data(int sender_fd, char *fname, char *pub_key, size_t pub_len,
   return 0;
 }
 
+static void help() {
+  printf("%-12s %-20s %-30s\n", "-h", "--help", "show this message");
+  printf("%-12s %-20s %-30s\n", "-i [ip]", "--server-ip [ip]",
+         "specify server domain, default: localhost");
+  printf("%-12s %-20s %-30s\n", "-p [port]", "--port [port]",
+         "specify server port, default: 8700");
+  printf("%-12s %-20s %-30s\n", "-f [file]", "--file [file]",
+         "file name to transfer, enter interactive mode if not specified");
+}
+
 int main(int argc, char *argv[]) {
-  char *host = NULL, *port = NULL, *fname = NULL;
-
-  if (argc != 7) {
-    info(0, "Usage: ./client -i server_ip -p server_port -f file_name");
-    return -1;
+  char *host = "localhost", *port = "8700", *fname = NULL;
+  const char optstr[] = "hi:p:f:";
+  const static struct option long_options[] = {
+      {"help", no_argument, 0, 'h'},
+      {"server-ip", optional_argument, 0, 'i'},
+      {"port", optional_argument, 0, 'p'},
+      {"file", optional_argument, 0, 'f'}};
+  int interactive = 1;
+  while (1) {
+    int c = getopt_long(argc, argv, optstr, long_options, NULL);
+    if (c == -1) break;
+    switch (c) {
+      case 'h':
+        printf("CASend Sender\n");
+        help();
+        return 0;
+      case 'i':
+        host = argv[optind - 1];
+        break;
+      case 'p':
+        port = argv[optind - 1];
+        break;
+      case 'f':
+        interactive = 0;
+        fname = argv[optind - 1];
+        break;
+      default:
+        help();
+        return -1;
+    }
   }
 
-  --argc;
-  ++argv;
-  if (argc > 0 && **argv == '-' && (*argv)[1] == 'i') {
-    --argc;
-    ++argv;
-    if (argc < 1) return -1;
-    host = malloc(sizeof(char) * strlen(*argv) + 1);
-    strncpy(host, *argv, strlen(*argv));
-  }
-
-  --argc;
-  ++argv;
-  if (argc > 0 && **argv == '-' && (*argv)[1] == 'p') {
-    --argc;
-    ++argv;
-    if (argc < 1) return -1;
-    port = malloc(sizeof(char) * strlen(*argv) + 1);
-    strncpy(port, *argv, strlen(*argv));
-  }
-
-  --argc;
-  ++argv;
-  if (argc > 0 && **argv == '-' && (*argv)[1] == 'f') {
-    --argc;
-    ++argv;
-    if (argc < 1) return -1;
-    fname = malloc(sizeof(char) * strlen(*argv) + 1);
-    strncpy(fname, *argv, strlen(*argv));
+  if (interactive) {
+    printf("----------------------------------\n");
+    printf("          CASend Sender           \n");
+    printf("----------------------------------\n");
+    prompt(0, "Please specify server ip, default = localhost");
+    printf("-> ");
+    host = malloc(sizeof(char) * 32);
+    host = fgets(host, 32, stdin);
+    host[strlen(host) - 1] = '\0';
+    if (host[0] == '\0') {
+      sprintf(host, "localhost");
+    }
+    prompt(0, "Please specify server port, default = 8700");
+    printf("-> ");
+    port = malloc(sizeof(char) * 6);
+    port = fgets(port, 6, stdin);
+    port[strlen(port) - 1] = '\0';
+    if (port[0] == '\0') {
+      sprintf(port, "8700");
+    }
+    prompt(0, "Please specify file name to transfer");
+    printf("-> ");
+    fname = malloc(sizeof(char) * 32);
+    fname = fgets(fname, 32, stdin);
+    fname[strlen(fname) - 1] = '\0';
+    if (fname[0] == '\0') {
+      fatal(0, "fname not specified");
+    }
   }
 
   if (host == NULL || port == NULL) {
-    error(0, "Server host or port not specified\n");
-    exit(-1);
+    fatal(0, "Server host or port not specified");
   } else {
-    info(0, "Input host: %s, port: %s\n", host, port);
+    info(0, "Input host: %s, port: %s", host, port);
   }
 
   int sender_fd __attribute__((unused)) = open_clientfd(host, port);
   if (sender_fd == -1) {
-    error(0, "Client file descriptor open failed\nPlease check host and port again");
-    exit(-1);
+    error(0, "Client file descriptor open failed");
+    fatal(0, "Please check host and port again");
   } else {
-    info(0, "Connection established, sender_fd = %d\n", sender_fd);
+    info(0, "Connection established, sender_fd = %d", sender_fd);
   }
 
   // Main process
@@ -358,26 +393,31 @@ int main(int argc, char *argv[]) {
 
   generate_keys(&code_pub_key, &code_pri_key, &code_pri_len, &code_pub_len);
 
-  info(sender_fd, "Register new file transfer\n");
+  info(sender_fd, "Register new file transfer");
   status = register_new_transfer(sender_fd, fname, code_pub_key, code_pub_len,
                                  code_pri_key, code_pri_len);
   if (status == -1) return -1;
 
   char *data_pub_key;
   size_t data_pub_len;
-  info(sender_fd, "Waiting for receiver...\n");
+  info(sender_fd, "Waiting for receiver...");
   status = receive_pub_key(sender_fd, fname, &data_pub_key, &data_pub_len);
   if (status == -1) return -1;
 
   char sha256_str[65];
 
-  info(sender_fd, "Start file transfer %s\n", fname);
+  info(sender_fd, "Start file transfer %s", fname);
   send_data(sender_fd, fname, data_pub_key, data_pub_len, sha256_str);
-  debug(sender_fd, "SHA256 checksum: %s", sha256_str);
+  info(sender_fd, "SHA256 checksum: %s", sha256_str);
 
   if (status == -1) return -1;
 
-  info(sender_fd, "Finish file transfer %s\n", fname);
+  info(sender_fd, "Finish file transfer %s", fname);
 
+  if (interactive) {
+    free0(host);
+    free0(port);
+    free0(fname);
+  }
   return 0;
 }

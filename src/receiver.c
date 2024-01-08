@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <getopt.h>
 #include <netinet/in.h>
 #include <openssl/sha.h>
 #include <stdio.h>
@@ -15,7 +16,7 @@
 #include "util.h"
 
 int recv_intention(int receiver_fd, char *input_code) {
-  info(receiver_fd, "Receive intention");
+  debug(receiver_fd, "Receive intention");
   packet_header_t header;
   packet_payload_t payload;
   int status = 0;
@@ -48,7 +49,7 @@ int recv_intention(int receiver_fd, char *input_code) {
 }
 
 int recv_fname(int receiver_fd, char **fname) {
-  info(receiver_fd, "Receive file name");
+  debug(receiver_fd, "Receive file name");
   packet_header_t header;
   packet_payload_t payload;
   int status = 0;
@@ -79,7 +80,7 @@ int recv_fname(int receiver_fd, char **fname) {
 }
 
 int send_pub_key(int receiver_fd, char *pub_key, size_t pub_len) {
-  info(receiver_fd, "Send pub key");
+  debug(receiver_fd, "Send pub key");
   packet_header_t header;
   packet_payload_t payload;
   int status = 0;
@@ -140,7 +141,7 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname,
 
   FILE *dst_file;
   char *file_path = malloc(strlen(directory) + strlen(fname));
-  sprintf(file_path, "%s%s", directory, fname);
+  sprintf(file_path, "%s/%s", directory, fname);
   dst_file = fopen(file_path, "wb");
   if (dst_file == NULL) {
     error(receiver_fd, "Fail opening destination file");
@@ -154,7 +155,7 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname,
   SHA256_CTX sha256;
   SHA256_Init(&sha256);
 
-  info(receiver_fd, "Start file trasfer");
+  debug(receiver_fd, "Start file trasfer");
   while (1) {
     // Receive header
     header = malloc(HEADER_LENGTH);
@@ -208,7 +209,7 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname,
     fwrite(ptext, sizeof(char), ptext_len, dst_file);
   }
 
-  info(receiver_fd, "Finish file transfer");
+  debug(receiver_fd, "Finish file transfer");
 
   SHA256_Final(hash, &sha256);
 
@@ -254,52 +255,92 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname,
   return 0;
 }
 
+static void help() {
+  printf("%-16s %-24s %-30s\n", "-h", "--help", "show this message");
+  printf("%-16s %-24s %-30s\n", "-i [ip]", "--server-ip [ip]",
+         "specify server domain, default: localhost");
+  printf("%-16s %-24s %-30s\n", "-p [port]", "--port [port]",
+         "specify server port, default: 8700");
+  printf("%-16s %-24s %-30s\n", "-d [directory]", "--directory [directory]",
+         "directory to store transferred file, default: .");
+  printf("%-16s %-24s %-30s\n", "-c [code]", "--code [code]",
+         "file transfer code, enter interactive mode if not specified");
+}
+
 int main(int argc, char *argv[]) {
-  char *host = NULL, *port = NULL, *directory = NULL, *input_code = NULL;
-
-  if (argc != 9) {
-    info(0, "Usage: ./client -i server_ip -p server_port -d directory -c code");
-    return -1;
+  char *host = "localhost", *port = "8700", *directory = ".",
+       *input_code = NULL;
+  const char optstr[] = "hi:p:d:c:";
+  const static struct option long_options[] = {
+      {"help", no_argument, 0, 'h'},
+      {"server-ip", optional_argument, 0, 'i'},
+      {"port", optional_argument, 0, 'p'},
+      {"directory", optional_argument, 0, 'd'},
+      {"code", optional_argument, 0, 'c'}};
+  int interactive = 1;
+  while (1) {
+    int c = getopt_long(argc, argv, optstr, long_options, NULL);
+    if (c == -1) break;
+    switch (c) {
+      case 'h':
+        printf("CASend Receiver\n");
+        help();
+        return 0;
+      case 'i':
+        host = argv[optind - 1];
+        break;
+      case 'p':
+        port = argv[optind - 1];
+        break;
+      case 'd':
+        directory = argv[optind - 1];
+        break;
+      case 'c':
+        interactive = 0;
+        input_code = argv[optind - 1];
+        break;
+      default:
+        help();
+        return -1;
+    }
   }
 
-  --argc;
-  ++argv;
-  if (argc > 0 && **argv == '-' && (*argv)[1] == 'i') {
-    --argc;
-    ++argv;
-    if (argc < 1) return -1;
-    host = malloc(sizeof(char) * strlen(*argv) + 1);
-    strncpy(host, *argv, strlen(*argv));
-  }
-
-  --argc;
-  ++argv;
-  if (argc > 0 && **argv == '-' && (*argv)[1] == 'p') {
-    --argc;
-    ++argv;
-    if (argc < 1) return -1;
-    port = malloc(sizeof(char) * strlen(*argv) + 1);
-    strncpy(port, *argv, strlen(*argv));
-  }
-
-  --argc;
-  ++argv;
-  if (argc > 0 && **argv == '-' && (*argv)[1] == 'd') {
-    --argc;
-    ++argv;
-    if (argc < 1) return -1;
-    directory = malloc(sizeof(char) * strlen(*argv) + 1);
-    sprintf(directory, "%s/", *argv);
-  }
-
-  --argc;
-  ++argv;
-  if (argc > 0 && **argv == '-' && (*argv)[1] == 'c') {
-    --argc;
-    ++argv;
-    if (argc < 1) return -1;
-    input_code = malloc(sizeof(char) * strlen(*argv) + 1);
-    strncpy(input_code, *argv, strlen(*argv));
+  if (interactive) {
+    printf("------------------------------------\n");
+    printf("          CASend Receiver           \n");
+    printf("------------------------------------\n");
+    prompt(0, "Please specify server ip, default = localhost");
+    printf("-> ");
+    host = malloc(sizeof(char) * 32);
+    host = fgets(host, 32, stdin);
+    host[strlen(host) - 1] = '\0';
+    if (host[0] == '\0') {
+      sprintf(host, "localhost");
+    }
+    prompt(0, "Please specify server port, default = 8700");
+    printf("-> ");
+    port = malloc(sizeof(char) * 6);
+    port = fgets(port, 6, stdin);
+    port[strlen(port) - 1] = '\0';
+    if (port[0] == '\0') {
+      sprintf(port, "8700");
+    }
+    prompt(0, "Please specify directory to store file, default = .");
+    printf("-> ");
+    directory = malloc(sizeof(char) * 32);
+    directory = fgets(directory, 32, stdin);
+    directory[strlen(directory) - 1] = '\0';
+    if (directory[0] == '\0') {
+      sprintf(directory, ".");
+    }
+    prompt(0, "Please specify file transfer code");
+    printf("-> ");
+    input_code = malloc(sizeof(char) * (CODE_LENGTH + 2));
+    input_code = fgets(input_code, CODE_LENGTH + 2, stdin);
+    input_code[strlen(input_code) - 1] = '\0';
+    if (input_code[0] == '\0') {
+      fatal(0, "input_code not specified");
+    }
   }
 
   if (host == NULL || port == NULL) {
@@ -311,8 +352,8 @@ int main(int argc, char *argv[]) {
 
   int receiver_fd __attribute__((unused)) = open_clientfd(host, port);
   if (receiver_fd == -1) {
-    error(0, "Client file descriptor open failed\nPlease check host and port again");
-    exit(-1);
+    error(0, "Client file descriptor open failed");
+    fatal(0, "Please check host and port again");
   } else {
     info(0, "Connection established, receiver_fd = %d", receiver_fd);
   }
@@ -331,14 +372,20 @@ int main(int argc, char *argv[]) {
   if (status == -1) return status;
 
   char sha256_str[65];
-  info(receiver_fd, "Start file transfer: %s%s", directory, fname);
+  info(receiver_fd, "Start file transfer: %s/%s", directory, fname);
   status = receive_data(receiver_fd, sha256_str, fname, directory, pri_key,
                         pri_len, pub_key, pub_len);
 
-  debug(receiver_fd, "SHA256 checksum: %s", sha256_str);
+  info(receiver_fd, "SHA256 checksum: %s", sha256_str);
 
   if (status == -1) return status;
-  info(receiver_fd, "Finish file transfer: %s%s", directory, fname);
+  info(receiver_fd, "Finish file transfer: %s/%s", directory, fname);
 
+  if (interactive) {
+    free0(host);
+    free0(port);
+    free0(directory);
+    free0(input_code);
+  }
   return 0;
 }
