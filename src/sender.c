@@ -12,10 +12,24 @@
 
 #include "config.h"
 #include "packet.h"
+#include "pbar.h"
 #include "rsa.h"
 #include "sock.h"
 #include "util.h"
 
+size_t get_fsize(char *fname) {
+  FILE *fp;
+  size_t sz;
+  fp = fopen(fname, "rb");
+  if (fp != NULL) {
+    fseek(fp, 0L, SEEK_END);
+    sz = ftell(fp);
+    fclose(fp);
+  } else {
+    sz = 0;
+  }
+  return sz;
+}
 int receiver_acked = 0;
 
 int send_intention(int sender_fd, char *pub_key, size_t pub_len) {
@@ -132,8 +146,8 @@ int register_new_transfer(int sender_fd, char *fname, char *pub_key,
   return 0;
 }
 
-int receive_pub_key(int sender_fd, char *fname, char **pub_key,
-                    size_t *pub_len) {
+int receive_pub_key(int sender_fd, char *fname, char **pub_key, size_t *pub_len,
+                    size_t *fsize) {
   debug(sender_fd, "Receive pub key");
   int status;
   // recv public key header
@@ -166,11 +180,22 @@ int receive_pub_key(int sender_fd, char *fname, char **pub_key,
 
   // ack public key
   debug(sender_fd, "Ack data public key");
-  create_header(&header, kOpAck, kPubKey, 0);
+  create_header(&header, kOpAck, kSize, sizeof(size_t));
   status = send(sender_fd, header, HEADER_LENGTH, 0);
   free(header);
   if (status == -1) {
     error(sender_fd, "Ack public key failed");
+    return -1;
+  }
+
+  packet_payload_t sz_payload;
+  *fsize = get_fsize(fname);
+  int sz_payload_len = GET_PAYLOAD_PACKET_LEN(sizeof(size_t));
+  create_payload(&sz_payload, 0, sizeof(size_t), (char *)fsize);
+  status = send(sender_fd, sz_payload, sz_payload_len, 0);
+  free(sz_payload);
+  if (status == -1) {
+    error(sender_fd, "Send file size failed");
     return -1;
   }
 
@@ -214,6 +239,7 @@ int send_data(int sender_fd, char *fname, char *pub_key, size_t pub_len,
       last_chunk_len = ptext_len % ptext_chunk_len;
       finish_send = 1;
     }
+    accumulated_sz += ptext_len;
 
     // Encrypt data
     size_t ctext_len = 0;
@@ -424,21 +450,25 @@ int main(int argc, char *argv[]) {
                                  code_pri_key, code_pri_len);
   if (status == -1) return -1;
 
+  size_t fsize;
   char *data_pub_key;
   size_t data_pub_len;
   
   // timer for waiting receiver
   info(sender_fd, "Waiting for receiver...");
-  pthread_t thread;
-  pthread_create(&thread, NULL, timer, (void *)&sender_fd);
-  
-  status = receive_pub_key(sender_fd, fname, &data_pub_key, &data_pub_len);
+  pthread_t timer_thread;
+  pthread_create(&timer_thread, NULL, timer, (void *)&sender_fd);
+  status =
+      receive_pub_key(sender_fd, fname, &data_pub_key, &data_pub_len, &fsize);
   if (status == -1) return -1;
 
   char sha256_str[65];
 
   info(sender_fd, "Start file transfer %s", fname);
+  pthread_t pbar_thread;
+  pthread_create(&pbar_thread, NULL, progress_bar, (void *)fsize);
   send_data(sender_fd, fname, data_pub_key, data_pub_len, sha256_str);
+  while (!pbar_exit) asm("");
   info(sender_fd, "SHA256 checksum: %s", sha256_str);
 
   if (status == -1) return -1;
