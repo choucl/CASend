@@ -79,7 +79,8 @@ int recv_fname(int receiver_fd, char **fname) {
   return 0;
 }
 
-int send_pub_key(int receiver_fd, char *pub_key, size_t pub_len) {
+int send_pub_key(int receiver_fd, char *pub_key, size_t pub_len,
+                 size_t *fsize) {
   debug(receiver_fd, "Send pub key");
   packet_header_t header;
   packet_payload_t payload;
@@ -110,23 +111,30 @@ int send_pub_key(int receiver_fd, char *pub_key, size_t pub_len) {
   header = malloc(HEADER_LENGTH);
   status = recv(receiver_fd, header, HEADER_LENGTH, 0);
   opcode_t opcode = get_opcode(header);
+  payload_type_t payload_type = get_payload_type(header);
   free(header);
-  if (status == -1 || opcode != kOpAck) {
+  if (status == -1 || opcode != kOpAck || payload_type != kSize) {
     error(receiver_fd, "Receive ack failed");
     return -1;
   }
+
+  int sz_payload_len = GET_PAYLOAD_PACKET_LEN(sizeof(size_t));
+  packet_payload_t sz_payload = malloc(sz_payload_len);
+  status = recv(receiver_fd, sz_payload, sz_payload_len, 0);
+  copy_payload(sz_payload, (char **)&fsize);
+  info(receiver_fd, "file size = %d", *fsize);
 
   return 0;
 }
 
 int request_transfer(int receiver_fd, char *input_code, char **fname,
-                     char *pub_key, size_t pub_len) {
+                     size_t *fsize, char *pub_key, size_t pub_len) {
   int status = 0;
   status = recv_intention(receiver_fd, input_code);
   if (status == -1) return -1;
   status = recv_fname(receiver_fd, fname);
   if (status == -1) return -1;
-  status = send_pub_key(receiver_fd, pub_key, pub_len);
+  status = send_pub_key(receiver_fd, pub_key, pub_len, fsize);
   if (status == -1) return -1;
 
   return 0;
@@ -361,13 +369,15 @@ int main(int argc, char *argv[]) {
   // Main process
   int status = 0;
   char *fname;
+  size_t fsize;
   char *pub_key, *pri_key;
   size_t pub_len;
   size_t pri_len;
   generate_keys(&pub_key, &pri_key, &pri_len, &pub_len);
 
   info(receiver_fd, "Request file transfer: %s", input_code);
-  status = request_transfer(receiver_fd, input_code, &fname, pub_key, pub_len);
+  status = request_transfer(receiver_fd, input_code, &fname, &fsize, pub_key,
+                            pub_len);
 
   if (status == -1) return status;
 
