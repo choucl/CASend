@@ -2,6 +2,7 @@
 #include <getopt.h>
 #include <netinet/in.h>
 #include <openssl/sha.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,6 +12,7 @@
 
 #include "config.h"
 #include "packet.h"
+#include "pbar.h"
 #include "rsa.h"
 #include "sock.h"
 #include "util.h"
@@ -121,8 +123,11 @@ int send_pub_key(int receiver_fd, char *pub_key, size_t pub_len,
   int sz_payload_len = GET_PAYLOAD_PACKET_LEN(sizeof(size_t));
   packet_payload_t sz_payload = malloc(sz_payload_len);
   status = recv(receiver_fd, sz_payload, sz_payload_len, 0);
-  copy_payload(sz_payload, (char **)&fsize);
-  info(receiver_fd, "file size = %d", *fsize);
+  size_t *file_sz;
+  copy_payload(sz_payload, (char **)&file_sz);
+  *fsize = *file_sz;
+  free(sz_payload);
+  free(file_sz);
 
   return 0;
 }
@@ -211,6 +216,7 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname,
       memcpy(ptext + ptext_len, ptext_chunk, ptext_chunk_len);
       ptext_len += ptext_chunk_len;
     }
+    accumulated_sz += ptext_len;
 
     SHA256_Update(&sha256, (char *)ptext, ptext_len);
 
@@ -378,14 +384,17 @@ int main(int argc, char *argv[]) {
   info(receiver_fd, "Request file transfer: %s", input_code);
   status = request_transfer(receiver_fd, input_code, &fname, &fsize, pub_key,
                             pub_len);
+  info(receiver_fd, "file size = %d", fsize);
 
   if (status == -1) return status;
 
   char sha256_str[65];
   info(receiver_fd, "Start file transfer: %s/%s", directory, fname);
+  pthread_t thread;
+  pthread_create(&thread, NULL, progress_bar, (void *)fsize);
   status = receive_data(receiver_fd, sha256_str, fname, directory, pri_key,
                         pri_len, pub_key, pub_len);
-
+  while (!pbar_exit) asm("");
   info(receiver_fd, "SHA256 checksum: %s", sha256_str);
 
   if (status == -1) return status;

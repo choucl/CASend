@@ -14,7 +14,7 @@ RECEIVER_TARGET := $(BUILD_DIR)/receiver
 
 __dir := $(shell mkdir -p $(BUILD_DIR))
 
-DEBUG = -g -DQUIET=0 -DDEBUG
+DEBUG = -g -DQUIET=0
 CFLAGS = -Wall -I$(INC_DIR) $(DEBUG)
 LDFLAGS = -lpthread -lm -lcrypto
 
@@ -26,11 +26,11 @@ $(SERVER_TARGET): $(addprefix $(BUILD_DIR)/, server.o sock.o packet.o util.o rsa
 	@echo [LINK] $@
 	@$(CC) -o $@ $^ $(LDFLAGS)
 
-$(SENDER_TARGET): $(addprefix $(BUILD_DIR)/, sender.o sock.o packet.o util.o rsa.o)
+$(SENDER_TARGET): $(addprefix $(BUILD_DIR)/, sender.o sock.o packet.o util.o rsa.o pbar.o)
 	@echo [LINK] $@
 	@$(CC) -o $@ $^ $(LDFLAGS)
 
-$(RECEIVER_TARGET): $(addprefix $(BUILD_DIR)/, receiver.o sock.o packet.o util.o rsa.o)
+$(RECEIVER_TARGET): $(addprefix $(BUILD_DIR)/, receiver.o sock.o packet.o util.o rsa.o pbar.o)
 	@echo [LINK] $@
 	@$(CC) -o $@ $^ $(LDFLAGS)
 

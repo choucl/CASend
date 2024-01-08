@@ -1,6 +1,7 @@
 #include <getopt.h>
 #include <netinet/in.h>
 #include <openssl/sha.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +11,7 @@
 
 #include "config.h"
 #include "packet.h"
+#include "pbar.h"
 #include "rsa.h"
 #include "sock.h"
 #include "util.h"
@@ -195,8 +197,8 @@ int receive_pub_key(int sender_fd, char *fname, char **pub_key, size_t *pub_len,
   return 0;
 }
 
-int send_data(int sender_fd, char *fname, size_t fsize, char *pub_key,
-              size_t pub_len, char sha256_str[65]) {
+int send_data(int sender_fd, char *fname, char *pub_key, size_t pub_len,
+              char sha256_str[65]) {
   FILE *src_file;
   src_file = fopen(fname, "rb");
 
@@ -232,6 +234,7 @@ int send_data(int sender_fd, char *fname, size_t fsize, char *pub_key,
       last_chunk_len = ptext_len % ptext_chunk_len;
       finish_send = 1;
     }
+    accumulated_sz += ptext_len;
 
     // Encrypt data
     size_t ctext_len = 0;
@@ -434,7 +437,10 @@ int main(int argc, char *argv[]) {
   char sha256_str[65];
 
   info(sender_fd, "Start file transfer %s", fname);
-  send_data(sender_fd, fname, fsize, data_pub_key, data_pub_len, sha256_str);
+  pthread_t thread;
+  pthread_create(&thread, NULL, progress_bar, (void *)fsize);
+  send_data(sender_fd, fname, data_pub_key, data_pub_len, sha256_str);
+  while (!pbar_exit) asm("");
   info(sender_fd, "SHA256 checksum: %s", sha256_str);
 
   if (status == -1) return -1;
