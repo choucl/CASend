@@ -18,6 +18,7 @@ typedef enum opcode {
 
 typedef enum payload_type {
   kNone = 0,
+  kSize,
   kCode,
   kPubKey,
   kData,

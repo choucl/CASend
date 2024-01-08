@@ -2,6 +2,7 @@
 #include <getopt.h>
 #include <netinet/in.h>
 #include <openssl/sha.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +13,7 @@
 
 #include "config.h"
 #include "packet.h"
+#include "pbar.h"
 #include "rsa.h"
 #include "sock.h"
 #include "util.h"
@@ -80,7 +82,8 @@ int recv_fname(int receiver_fd, char **fname) {
   return 0;
 }
 
-int send_pub_key(int receiver_fd, char *pub_key, size_t pub_len) {
+int send_pub_key(int receiver_fd, char *pub_key, size_t pub_len,
+                 size_t *fsize) {
   debug(receiver_fd, "Send pub key");
   packet_header_t header;
   packet_payload_t payload;
@@ -111,30 +114,39 @@ int send_pub_key(int receiver_fd, char *pub_key, size_t pub_len) {
   header = malloc(HEADER_LENGTH);
   status = recv(receiver_fd, header, HEADER_LENGTH, 0);
   opcode_t opcode = get_opcode(header);
+  payload_type_t payload_type = get_payload_type(header);
   free(header);
-  if (status == -1 || opcode != kOpAck) {
+  if (status == -1 || opcode != kOpAck || payload_type != kSize) {
     error(receiver_fd, "Receive ack failed");
     return -1;
   }
+
+  int sz_payload_len = GET_PAYLOAD_PACKET_LEN(sizeof(size_t));
+  packet_payload_t sz_payload = malloc(sz_payload_len);
+  status = recv(receiver_fd, sz_payload, sz_payload_len, 0);
+  size_t *file_sz;
+  copy_payload(sz_payload, (char **)&file_sz);
+  *fsize = *file_sz;
+  free(sz_payload);
+  free(file_sz);
 
   return 0;
 }
 
 int request_transfer(int receiver_fd, char *input_code, char **fname,
-                     char *pub_key, size_t pub_len) {
+                     size_t *fsize, char *pub_key, size_t pub_len) {
   int status = 0;
   status = recv_intention(receiver_fd, input_code);
   if (status == -1) return -1;
   status = recv_fname(receiver_fd, fname);
   if (status == -1) return -1;
-  status = send_pub_key(receiver_fd, pub_key, pub_len);
+  status = send_pub_key(receiver_fd, pub_key, pub_len, fsize);
   if (status == -1) return -1;
 
   return 0;
 }
 
 int receive_data(int receiver_fd, FILE *ctext_file) {
-  debug(receiver_fd, "Start file transfer");
   packet_header_t header;
   packet_payload_t payload;
   int status;
@@ -174,8 +186,6 @@ int receive_data(int receiver_fd, FILE *ctext_file) {
     }
     fwrite(ctext, 1, ctext_len, ctext_file);
   }
-
-  info(receiver_fd, "Finish file transfer");
 
   return 0;
 }
@@ -231,6 +241,8 @@ int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
           ptext_len += ptext_chunk_len;
       }
     }
+    accumulated_sz += ptext_len;
+    info(0, "acc size:%zu", accumulated_sz);
 
     SHA256_Update(&sha256, (char *)ptext, ptext_len);
     fwrite(ptext, 1, ptext_len, ptext_file);
@@ -408,6 +420,7 @@ int main(int argc, char *argv[]) {
   // Main process
   int status = 0;
   char *fname;
+  size_t fsize;
   char *pub_key, *pri_key;
   size_t pub_len;
   size_t pri_len;
@@ -415,18 +428,23 @@ int main(int argc, char *argv[]) {
   if (status == -1) return status;
 
   info(receiver_fd, "Request file transfer: %s", input_code);
-  status = request_transfer(receiver_fd, input_code, &fname, pub_key, pub_len);
-  if (status == -1) return status;
 
+  status = request_transfer(receiver_fd, input_code, &fname, &fsize, pub_key,
+                            pub_len);
+  info(receiver_fd, "file size = %d", fsize);
+
+  if (status == -1) return status;
   char sha256_str[65];
-
   FILE *ctext_file = tmpfile();
-  info(receiver_fd, "Start file transfer: %s%s", directory, fname);
+  info(receiver_fd, "Start file transfer: %s/%s", directory, fname);
+
   status = receive_data(receiver_fd, ctext_file);
-  if (status == -1) return status;
 
   rewind(ctext_file);
+  pthread_t thread;
+  pthread_create(&thread, NULL, progress_bar, (void *)fsize);
   status = decrypt_file(ctext_file, fname, directory, pri_key, pri_len, sha256_str, atoi(num_thread));
+  while (!pbar_exit) asm("");
   fclose(ctext_file);
   if (status == -1) return status;
 

@@ -311,7 +311,7 @@ static int pubkey_transmission_handler(service_entry_t *entry) {
     return -1;
   }
   // ack
-  status = bypass_packet(entry, 1, 0, NULL);
+  status = bypass_packet(entry, 1, 1, NULL);
   if (status <= 0) {
     error(entry->sender_fd, "sender ack public key failed");
     return -1;
@@ -448,7 +448,7 @@ int main(int argc, char *argv[]) {
   }
   while (1) {
     struct sockaddr client_info;
-    socklen_t addrlen;
+    socklen_t addrlen = 32;
     long clientfd = accept(listenfd, &client_info, &addrlen);
     if (clientfd == -1) continue;
     pthread_t thread;
