@@ -8,6 +8,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <omp.h>
 
 #include "config.h"
 #include "packet.h"
@@ -180,7 +181,7 @@ int receive_data(int receiver_fd, FILE *ctext_file) {
 }
 
 int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
-                 size_t pri_len, char sha256_str[65]) {
+                 size_t pri_len, char sha256_str[65], int num_thread) {
   FILE *ptext_file;
   char *file_path = malloc(strlen(directory) + strlen(fname));
   sprintf(file_path, "%s%s", directory, fname);
@@ -190,24 +191,52 @@ int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
     return -1;
   }
 
+  info(0, "Start file decryption with %d threads", num_thread);
+
   unsigned char hash[SHA256_DIGEST_LENGTH];
   SHA256_CTX sha256;
   SHA256_Init(&sha256);
 
-  info(0, "Start file decryption");
+  int num_ctext_chunk = num_thread;
+  size_t ctext_chunk_len = 256;
+  int max_ctext_len = num_thread * ctext_chunk_len;
+  char ctext[max_ctext_len];
+  char ptext[num_thread * 128];
+  int finish_decrypt = 0;
+  omp_set_num_threads(num_thread);
 
   while (1) {
-    // Receive data
-    char ctext[256];
-    size_t ctext_len = fread(ctext, 1, 256, ctext_file);
+
+    size_t ctext_len = fread(ctext, 1, max_ctext_len, ctext_file);
+    size_t ptext_len = 0;
+
     if (ctext_len == 0)
       break;
-    size_t ptext_len;
-    unsigned char *ptext = decrypt(pri_key, pri_len,
-                                  (const unsigned char *)ctext,
-                                   ctext_len, &ptext_len);
+
+    if (ctext_len < max_ctext_len) {
+      num_ctext_chunk = ctext_len / ctext_chunk_len;
+      finish_decrypt = 1;
+    }
+
+    #pragma omp parallel
+    {
+      int tid = omp_get_thread_num();
+      if (tid < num_ctext_chunk) {
+        size_t ptext_chunk_len;
+        unsigned char *ptext_chunk = decrypt(pri_key, pri_len,
+                                            (const unsigned char *)(ctext + ctext_chunk_len * tid),
+                                             ctext_chunk_len, &ptext_chunk_len);
+        memcpy(ptext + (128 * tid), ptext_chunk, ptext_chunk_len);
+        #pragma omp critical
+          ptext_len += ptext_chunk_len;
+      }
+    }
+
     SHA256_Update(&sha256, (char *)ptext, ptext_len);
-    fwrite(ptext, sizeof(char), ptext_len, ptext_file);
+    fwrite(ptext, 1, ptext_len, ptext_file);
+
+    if (finish_decrypt == 1) break;
+
   }
 
   info(0, "Finish file decryption");
@@ -269,17 +298,20 @@ static void help() {
          "directory to store transferred file, default: .");
   printf("%-16s %-24s %-30s\n", "-c [code]", "--code [code]",
          "file transfer code, enter interactive mode if not specified");
+  printf("%-16s %-24s %-30s\n", "-t [num-thread]", "--num-thread [num-thread]",
+         "number of thread for file decryption, default: 4");
 }
 
 int main(int argc, char *argv[]) {
   char *host = "localhost", *port = "8700", *directory = ".",
-       *input_code = NULL;
-  const char optstr[] = "hi:p:d:c:";
+       *input_code = NULL, *num_thread = "4";
+  const char optstr[] = "hi:p:d:t:c:";
   const static struct option long_options[] = {
       {"help", no_argument, 0, 'h'},
       {"server-ip", optional_argument, 0, 'i'},
       {"port", optional_argument, 0, 'p'},
       {"directory", optional_argument, 0, 'd'},
+      {"num-thread", optional_argument, 0, 't'},
       {"code", optional_argument, 0, 'c'}};
   int interactive = 1;
   while (1) {
@@ -298,6 +330,9 @@ int main(int argc, char *argv[]) {
         break;
       case 'd':
         directory = argv[optind - 1];
+        break;
+      case 't':
+        num_thread = argv[optind - 1];
         break;
       case 'c':
         interactive = 0;
@@ -336,6 +371,14 @@ int main(int argc, char *argv[]) {
     directory[strlen(directory) - 1] = '\0';
     if (directory[0] == '\0') {
       sprintf(directory, ".");
+    }
+    prompt(0, "Please specify number of threads");
+    printf("-> ");
+    num_thread = malloc(sizeof(char) * 3);
+    num_thread = fgets(num_thread, 3, stdin);
+    num_thread[strlen(num_thread) - 1] = '\0';
+    if (num_thread[0] == '\0') {
+      sprintf(num_thread, "4");
     }
     prompt(0, "Please specify file transfer code");
     printf("-> ");
@@ -383,7 +426,7 @@ int main(int argc, char *argv[]) {
   if (status == -1) return status;
 
   rewind(ctext_file);
-  status = decrypt_file(ctext_file, fname, directory, pri_key, pri_len, sha256_str);
+  status = decrypt_file(ctext_file, fname, directory, pri_key, pri_len, sha256_str, atoi(num_thread));
   fclose(ctext_file);
   if (status == -1) return status;
 

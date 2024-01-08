@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <omp.h>
 
 #include "config.h"
 #include "packet.h"
@@ -171,7 +172,7 @@ int receive_pub_key(int sender_fd, char *fname, char **pub_key,
 }
 
 int encrypt_file(char *fname, FILE *ctext_file, char *pub_key, size_t pub_len,
-                 char sha256_str[65]) {
+                 char sha256_str[65], int num_thread) {
   FILE *src_file;
   src_file = fopen(fname, "rb");
 
@@ -180,34 +181,68 @@ int encrypt_file(char *fname, FILE *ctext_file, char *pub_key, size_t pub_len,
     return -1;
   }
 
-  size_t ptext_len;
-  size_t max_ptext_len = 128;
-
-  int finish_encrypt = 0;
+  debug(0, "Start file encryption with %d threads", num_thread);
 
   unsigned char hash[SHA256_DIGEST_LENGTH];
   SHA256_CTX sha256;
   SHA256_Init(&sha256);
 
-  // Read data & send
-  char ptext[max_ptext_len];
+  size_t ptext_len;
+  size_t ptext_chunk_len = 128;
+  size_t max_ptext_len = ptext_chunk_len * num_thread;
 
-  debug(0, "Start file encryption");
+  size_t last_ptext_chunk_len = 0;
+  int num_ptext_chunk = num_thread;
+
+  size_t max_ctext_len = 256 * num_thread;
+  char ctext[max_ctext_len];
+
+  int finish_encrypt = 0;
+
+  omp_set_num_threads(num_thread);
 
   while (1) {
+    size_t ctext_len = 0;
+    char ptext[max_ptext_len];
     ptext_len = fread(ptext, sizeof(char), max_ptext_len, src_file);
-    SHA256_Update(&sha256, ptext, ptext_len);
+    SHA256_Update(&sha256, (char *)ptext, ptext_len);
+
+    if (ptext_len == 0)
+      break;
+
     if (ptext_len < max_ptext_len) {
       finish_encrypt = 1;
+      last_ptext_chunk_len = ptext_len % ptext_chunk_len;
+      num_ptext_chunk = (ptext_len / ptext_chunk_len) + 1;
     }
 
-    // Encrypt data
-    size_t ctext_len = 0;
-    unsigned char *ctext = encrypt(
-        pub_key, pub_len, (const unsigned char *)ptext, ptext_len, &ctext_len);
-    // Write to tmp file
-    fwrite(ctext, 1, ctext_len, ctext_file);
+    #pragma omp parallel
+    {
+      int tid = omp_get_thread_num();
+      if (tid < num_ptext_chunk) {
+        size_t ctext_chunk_len = 0;
+        unsigned char *ctext_chunk;
+        if (finish_encrypt == 1 && tid == num_ptext_chunk - 1) {
+          ctext_chunk = encrypt(pub_key, pub_len,
+                               (const unsigned char *)(ptext + ptext_chunk_len * tid),
+                                last_ptext_chunk_len,
+                                &ctext_chunk_len);
+          memcpy(ctext + (256 * tid), ctext_chunk, ctext_chunk_len);
+        } else {
+          ctext_chunk = encrypt(pub_key, pub_len,
+                               (const unsigned char *)(ptext + ptext_chunk_len * tid),
+                                ptext_chunk_len,
+                                &ctext_chunk_len);
+        }
+        memcpy(ctext + (256 * tid), ctext_chunk, ctext_chunk_len);
+        #pragma omp critical
+          ctext_len += ctext_chunk_len;
+      }
+    }
+    fwrite(ctext, sizeof(char), ctext_len, ctext_file);
+
     if (finish_encrypt == 1) break;
+
   }
 
   info(0, "Finish file encryption");
@@ -223,15 +258,14 @@ int encrypt_file(char *fname, FILE *ctext_file, char *pub_key, size_t pub_len,
 }
 
 int send_data(int sender_fd, FILE *ctext_file) {
+  info(sender_fd, "Start file transfer");
   int status;
   packet_header_t header;
   packet_payload_t payload;
   int finish_send = 0;
-  // Read data & send
-  // char ptext[max_ptext_len];
-  char ctext[MAX_PAYLOAD_LEN];
 
-  info(sender_fd, "Start file transfer");
+  // Read data & send
+  char ctext[MAX_PAYLOAD_LEN];
 
   while (1) {
     size_t ctext_len = fread(ctext, 1, MAX_PAYLOAD_LEN, ctext_file);
@@ -308,17 +342,21 @@ static void help() {
          "specify server domain, default: localhost");
   printf("%-12s %-20s %-30s\n", "-p [port]", "--port [port]",
          "specify server port, default: 8700");
+  printf("%-16s %-24s %-30s\n", "-t [num-thread]", "--num-thread [num-thread]",
+         "number of thread for file decryption, default: 4");
   printf("%-12s %-20s %-30s\n", "-f [file]", "--file [file]",
          "file name to transfer, enter interactive mode if not specified");
+
 }
 
 int main(int argc, char *argv[]) {
-  char *host = "localhost", *port = "8700", *fname = NULL;
-  const char optstr[] = "hi:p:f:";
+  char *host = "localhost", *port = "8700", *fname = NULL, *num_thread = "4";
+  const char optstr[] = "hi:p:t:f:";
   const static struct option long_options[] = {
       {"help", no_argument, 0, 'h'},
       {"server-ip", optional_argument, 0, 'i'},
       {"port", optional_argument, 0, 'p'},
+      {"num-thread", optional_argument, 0, 't'},
       {"file", optional_argument, 0, 'f'}};
   int interactive = 1;
   while (1) {
@@ -334,6 +372,9 @@ int main(int argc, char *argv[]) {
         break;
       case 'p':
         port = argv[optind - 1];
+        break;
+      case 't':
+        num_thread = argv[optind - 1];
         break;
       case 'f':
         interactive = 0;
@@ -364,6 +405,14 @@ int main(int argc, char *argv[]) {
     port[strlen(port) - 1] = '\0';
     if (port[0] == '\0') {
       sprintf(port, "8700");
+    }
+    prompt(0, "Please specify number of threads");
+    printf("-> ");
+    num_thread = malloc(sizeof(char) * 3);
+    num_thread = fgets(num_thread, 3, stdin);
+    num_thread[strlen(num_thread) - 1] = '\0';
+    if (num_thread[0] == '\0') {
+      sprintf(num_thread, "4");
     }
     prompt(0, "Please specify file name to transfer");
     printf("-> ");
@@ -411,7 +460,7 @@ int main(int argc, char *argv[]) {
   FILE *ctext_file = tmpfile();
   char sha256_str[65];
   status =
-      encrypt_file(fname, ctext_file, data_pub_key, data_pub_len, sha256_str);
+      encrypt_file(fname, ctext_file, data_pub_key, data_pub_len, sha256_str, atoi(num_thread));
   if (status == -1) return -1;
   rewind(ctext_file);
 
@@ -419,10 +468,9 @@ int main(int argc, char *argv[]) {
   status = send_data(sender_fd, ctext_file);
   fclose(ctext_file);
   if (status == -1) return -1;
-  status = compare_check_sum(sender_fd, sha256_str);
-  if (status == -1) return -1;
-  info(sender_fd, "SHA256 checksum: %s", sha256_str);
 
+  info(sender_fd, "SHA256 checksum: %s", sha256_str);
+  status = compare_check_sum(sender_fd, sha256_str);
   if (status == -1) return -1;
 
   info(sender_fd, "Finish file transfer %s", fname);

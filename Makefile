@@ -15,8 +15,8 @@ RECEIVER_TARGET := $(BUILD_DIR)/receiver
 __dir := $(shell mkdir -p $(BUILD_DIR))
 
 DEBUG = -g -DQUIET=0 -DDEBUG
-CFLAGS = -Wall -I$(INC_DIR) $(DEBUG)
-LDFLAGS = -lpthread -lm -lcrypto
+CFLAGS = -Wall -I$(INC_DIR) $(DEBUG) -fopenmp
+LDFLAGS = -lpthread -lm -lcrypto -fopenmp
 
 .PHONY: clean all
 
