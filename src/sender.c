@@ -43,7 +43,8 @@ int send_intention(int sender_fd, char *pub_key, size_t pub_len) {
 }
 
 int recv_code(int sender_fd, int *code, char *pri_key, size_t pri_len) {
-  info(sender_fd, "Receive code") packet_header_t header;
+  info(sender_fd, "Receive code");
+  packet_header_t header;
   packet_payload_t payload;
   int status;
   // receive ack & code header
@@ -343,7 +344,7 @@ int main(int argc, char *argv[]) {
 
   int sender_fd __attribute__((unused)) = open_clientfd(host, port);
   if (sender_fd == -1) {
-    error(0, "Client file descriptor open failed\nplease check host and port again");
+    error(0, "Client file descriptor open failed\nPlease check host and port again");
     exit(-1);
   } else {
     info(0, "Connection established, sender_fd = %d\n", sender_fd);
