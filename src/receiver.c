@@ -132,30 +132,15 @@ int request_transfer(int receiver_fd, char *input_code, char **fname,
   return 0;
 }
 
-int receive_data(int receiver_fd, char sha256_str[65], char *fname,
-                 char *directory, char *pri_key, size_t pri_len, char *pub_key,
-                 size_t pub_len) {
+int receive_data(int receiver_fd, FILE *ctext_file) {
+  debug(receiver_fd, "Start file transfer");
   packet_header_t header;
   packet_payload_t payload;
   int status;
 
-  FILE *dst_file;
-  char *file_path = malloc(strlen(directory) + strlen(fname));
-  sprintf(file_path, "%s/%s", directory, fname);
-  dst_file = fopen(file_path, "wb");
-  if (dst_file == NULL) {
-    error(receiver_fd, "Fail opening destination file");
-    return -1;
-  }
-
   // Receive data
   size_t payload_buf_len = GET_PAYLOAD_PACKET_LEN(MAX_PAYLOAD_LEN);
 
-  unsigned char hash[SHA256_DIGEST_LENGTH];
-  SHA256_CTX sha256;
-  SHA256_Init(&sha256);
-
-  debug(receiver_fd, "Start file trasfer");
   while (1) {
     // Receive header
     header = malloc(HEADER_LENGTH);
@@ -186,39 +171,59 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname,
       error(receiver_fd, "Receive data failed");
       return -1;
     }
-
-    char ptext[MAX_PAYLOAD_LEN / 2];
-    size_t ptext_len = 0;
-    size_t ctext_chunk_len = 256;
-    char ctext_chunk[ctext_chunk_len];
-
-    int iter = ctext_len / ctext_chunk_len;
-
-    for (int i = 0; i < iter; i++) {
-      memcpy(ctext_chunk, ctext + ctext_chunk_len * i, ctext_chunk_len);
-      size_t ptext_chunk_len;
-      unsigned char *ptext_chunk =
-          decrypt(pri_key, pri_len, (const unsigned char *)ctext_chunk,
-                  ctext_chunk_len, &ptext_chunk_len);
-      memcpy(ptext + ptext_len, ptext_chunk, ptext_chunk_len);
-      ptext_len += ptext_chunk_len;
-    }
-
-    SHA256_Update(&sha256, (char *)ptext, ptext_len);
-
-    fwrite(ptext, sizeof(char), ptext_len, dst_file);
+    fwrite(ctext, 1, ctext_len, ctext_file);
   }
 
-  debug(receiver_fd, "Finish file transfer");
+  info(receiver_fd, "Finish file transfer");
 
+  return 0;
+}
+
+int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
+                 size_t pri_len, char sha256_str[65]) {
+  FILE *ptext_file;
+  char *file_path = malloc(strlen(directory) + strlen(fname));
+  sprintf(file_path, "%s%s", directory, fname);
+  ptext_file = fopen(file_path, "wb");
+  if (ptext_file == NULL) {
+    error(0, "Fail opening destination file");
+    return -1;
+  }
+
+  unsigned char hash[SHA256_DIGEST_LENGTH];
+  SHA256_CTX sha256;
+  SHA256_Init(&sha256);
+
+  info(0, "Start file decryption");
+
+  while (1) {
+    // Receive data
+    char ctext[256];
+    size_t ctext_len = fread(ctext, 1, 256, ctext_file);
+    if (ctext_len == 0)
+      break;
+    size_t ptext_len;
+    unsigned char *ptext = decrypt(pri_key, pri_len,
+                                  (const unsigned char *)ctext,
+                                   ctext_len, &ptext_len);
+    SHA256_Update(&sha256, (char *)ptext, ptext_len);
+    fwrite(ptext, sizeof(char), ptext_len, ptext_file);
+  }
+
+  info(0, "Finish file decryption");
   SHA256_Final(hash, &sha256);
 
   for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
     sprintf(sha256_str + (i * 2), "%02x", hash[i]);
   }
 
-  fclose(dst_file);
+  return 0;
+}
 
+int compare_check_sum(int receiver_fd, char sha256_str[65]) {
+  packet_header_t header;
+  packet_payload_t payload;
+  int status;
   // recv SHA256
   debug(receiver_fd, "Receive SHA256 checksum");
   char *sha256_str_buf;
@@ -251,7 +256,6 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname,
     error(receiver_fd, "Finish failed");
     return -1;
   }
-
   return 0;
 }
 
@@ -364,20 +368,27 @@ int main(int argc, char *argv[]) {
   char *pub_key, *pri_key;
   size_t pub_len;
   size_t pri_len;
-  generate_keys(&pub_key, &pri_key, &pri_len, &pub_len);
+  status = generate_keys(&pub_key, &pri_key, &pri_len, &pub_len);
+  if (status == -1) return status;
 
   info(receiver_fd, "Request file transfer: %s", input_code);
   status = request_transfer(receiver_fd, input_code, &fname, pub_key, pub_len);
-
   if (status == -1) return status;
 
   char sha256_str[65];
-  info(receiver_fd, "Start file transfer: %s/%s", directory, fname);
-  status = receive_data(receiver_fd, sha256_str, fname, directory, pri_key,
-                        pri_len, pub_key, pub_len);
+
+  FILE *ctext_file = tmpfile();
+  info(receiver_fd, "Start file transfer: %s%s", directory, fname);
+  status = receive_data(receiver_fd, ctext_file);
+  if (status == -1) return status;
+
+  rewind(ctext_file);
+  status = decrypt_file(ctext_file, fname, directory, pri_key, pri_len, sha256_str);
+  fclose(ctext_file);
+  if (status == -1) return status;
 
   info(receiver_fd, "SHA256 checksum: %s", sha256_str);
-
+  status = compare_check_sum(receiver_fd, sha256_str);
   if (status == -1) return status;
   info(receiver_fd, "Finish file transfer: %s/%s", directory, fname);
 
