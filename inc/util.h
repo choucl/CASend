@@ -5,6 +5,8 @@
 
 void prefixprintf(char *prefix, int fd, const char *format, ...);
 
+#define free0(p) do { free(p); p = NULL; } while (0)
+
 #define prompt(fd, ...)                  \
   do {                                   \
     prefixprintf("::", fd, __VA_ARGS__); \
