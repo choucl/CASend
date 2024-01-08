@@ -309,26 +309,38 @@ int main(int argc, char *argv[]) {
     printf("------------------------------------\n");
     printf("          CASend Receiver           \n");
     printf("------------------------------------\n");
-    prompt(0, "Please specify server ip");
+    prompt(0, "Please specify server ip, default = localhost");
     printf("-> ");
     host = malloc(sizeof(char) * 32);
     host = fgets(host, 32, stdin);
     host[strlen(host) - 1] = '\0';
-    prompt(0, "Please specify server port");
+    if (host[0] == '\0') {
+      sprintf(host, "localhost");
+    }
+    prompt(0, "Please specify server port, default = 8700");
     printf("-> ");
     port = malloc(sizeof(char) * 6);
     port = fgets(port, 6, stdin);
     port[strlen(port) - 1] = '\0';
+    if (port[0] == '\0') {
+      sprintf(port, "8700");
+    }
+    prompt(0, "Please specify directory to store file, default = .");
+    printf("-> ");
+    directory = malloc(sizeof(char) * 32);
+    directory = fgets(directory, 32, stdin);
+    directory[strlen(directory) - 1] = '\0';
+    if (directory[0] == '\0') {
+      sprintf(directory, ".");
+    }
     prompt(0, "Please specify file transfer code");
     printf("-> ");
     input_code = malloc(sizeof(char) * (CODE_LENGTH + 2));
     input_code = fgets(input_code, CODE_LENGTH + 2, stdin);
     input_code[strlen(input_code) - 1] = '\0';
-    prompt(0, "Please specify directory to store transferred file");
-    printf("-> ");
-    directory = malloc(sizeof(char) * 32);
-    directory = fgets(directory, 32, stdin);
-    directory[strlen(directory) - 1] = '\0';
+    if (input_code[0] == '\0') {
+      fatal(0, "input_code not specified");
+    }
   }
 
   if (host == NULL || port == NULL) {

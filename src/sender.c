@@ -345,31 +345,36 @@ int main(int argc, char *argv[]) {
     printf("----------------------------------\n");
     printf("          CASend Sender           \n");
     printf("----------------------------------\n");
-    prompt(0, "Please specify server ip");
+    prompt(0, "Please specify server ip, default = localhost");
     printf("-> ");
     host = malloc(sizeof(char) * 32);
     host = fgets(host, 32, stdin);
     host[strlen(host) - 1] = '\0';
-    prompt(0, "Please specify server port");
+    if (host[0] == '\0') {
+      sprintf(host, "localhost");
+    }
+    prompt(0, "Please specify server port, default = 8700");
     printf("-> ");
     port = malloc(sizeof(char) * 6);
     port = fgets(port, 6, stdin);
     port[strlen(port) - 1] = '\0';
+    if (port[0] == '\0') {
+      sprintf(port, "8700");
+    }
     prompt(0, "Please specify file name to transfer");
     printf("-> ");
     fname = malloc(sizeof(char) * 32);
     fname = fgets(fname, 32, stdin);
     fname[strlen(fname) - 1] = '\0';
+    if (fname[0] == '\0') {
+      fatal(0, "fname not specified");
+    }
   }
 
   if (host == NULL || port == NULL) {
     fatal(0, "Server host or port not specified");
   } else {
     info(0, "Input host: %s, port: %s", host, port);
-  }
-
-  if (fname == NULL) {
-    fatal(0, "fname not specified");
   }
 
   int sender_fd __attribute__((unused)) = open_clientfd(host, port);
