@@ -456,8 +456,8 @@ int main(int argc, char *argv[]) {
   
   // timer for waiting receiver
   info(sender_fd, "Waiting for receiver...");
-  pthread_t thread;
-  pthread_create(&thread, NULL, timer, (void *)&sender_fd);
+  pthread_t timer_thread;
+  pthread_create(&timer_thread, NULL, timer, (void *)&sender_fd);
   status =
       receive_pub_key(sender_fd, fname, &data_pub_key, &data_pub_len, &fsize);
   if (status == -1) return -1;
@@ -465,8 +465,8 @@ int main(int argc, char *argv[]) {
   char sha256_str[65];
 
   info(sender_fd, "Start file transfer %s", fname);
-  pthread_t thread;
-  pthread_create(&thread, NULL, progress_bar, (void *)fsize);
+  pthread_t pbar_thread;
+  pthread_create(&pbar_thread, NULL, progress_bar, (void *)fsize);
   send_data(sender_fd, fname, data_pub_key, data_pub_len, sha256_str);
   while (!pbar_exit) asm("");
   info(sender_fd, "SHA256 checksum: %s", sha256_str);
