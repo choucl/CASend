@@ -411,14 +411,14 @@ static void *serve(void *argp) {
 static void help() {
   printf("%-12s %-16s %-20s\n", "-h", "--help", "show this message");
   printf("%-12s %-16s %-20s\n", "-p [port]", "--port [port]",
-         "specify server port");
+         "specify server port, default: 8700");
 }
 
 int main(int argc, char *argv[]) {
-  char *server_port = NULL;
+  char *server_port = "8700";
   const char optstr[] = "hp:";
   const static struct option long_options[] = {
-      {"help", no_argument, 0, 'h'}, {"port", required_argument, 0, 'p'}};
+      {"help", no_argument, 0, 'h'}, {"port", optional_argument, 0, 'p'}};
   while (1) {
     int c = getopt_long(argc, argv, optstr, long_options, NULL);
     if (c == -1) break;
