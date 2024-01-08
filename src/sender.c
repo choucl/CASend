@@ -203,13 +203,11 @@ int encrypt_file(char *fname, FILE *ctext_file, char *pub_key, size_t pub_len,
 
     // Encrypt data
     size_t ctext_len = 0;
-    unsigned char *ctext= encrypt(pub_key, pub_len,
-                                 (const unsigned char *)ptext,
-                                  ptext_len, &ctext_len);
+    unsigned char *ctext = encrypt(
+        pub_key, pub_len, (const unsigned char *)ptext, ptext_len, &ctext_len);
     // Write to tmp file
     fwrite(ctext, 1, ctext_len, ctext_file);
-    if (finish_encrypt == 1)
-      break;
+    if (finish_encrypt == 1) break;
   }
 
   info(0, "Finish file encryption");
@@ -224,22 +222,20 @@ int encrypt_file(char *fname, FILE *ctext_file, char *pub_key, size_t pub_len,
   return 0;
 }
 
-
 int send_data(int sender_fd, FILE *ctext_file) {
   int status;
   packet_header_t header;
   packet_payload_t payload;
   int finish_send = 0;
   // Read data & send
-  //char ptext[max_ptext_len];
+  // char ptext[max_ptext_len];
   char ctext[MAX_PAYLOAD_LEN];
 
   info(sender_fd, "Start file transfer");
 
   while (1) {
     size_t ctext_len = fread(ctext, 1, MAX_PAYLOAD_LEN, ctext_file);
-    if (ctext_len < MAX_PAYLOAD_LEN)
-      finish_send = 1;
+    if (ctext_len < MAX_PAYLOAD_LEN) finish_send = 1;
 
     // Send data header
     create_header(&header, kOpData, kData, ctext_len);
@@ -414,7 +410,8 @@ int main(int argc, char *argv[]) {
 
   FILE *ctext_file = tmpfile();
   char sha256_str[65];
-  status = encrypt_file(fname, ctext_file, data_pub_key, data_pub_len, sha256_str);
+  status =
+      encrypt_file(fname, ctext_file, data_pub_key, data_pub_len, sha256_str);
   if (status == -1) return -1;
   rewind(ctext_file);
 
