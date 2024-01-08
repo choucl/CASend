@@ -9,7 +9,7 @@ void prefixprintf(char *prefix, int fd, const char *format, ...);
 
 #define prompt(fd, ...)                  \
   do {                                   \
-    prefixprintf("::", fd, __VA_ARGS__); \
+    prefixprintf("::::", fd, __VA_ARGS__); \
   } while (0);
 
 #if DEBUG
