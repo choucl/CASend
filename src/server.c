@@ -448,7 +448,7 @@ int main(int argc, char *argv[]) {
   }
   while (1) {
     struct sockaddr client_info;
-    socklen_t addrlen;
+    socklen_t addrlen = 32;
     long clientfd = accept(listenfd, &client_info, &addrlen);
     if (clientfd == -1) continue;
     pthread_t thread;
