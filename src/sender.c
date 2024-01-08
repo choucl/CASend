@@ -1,11 +1,13 @@
 #include <getopt.h>
 #include <netinet/in.h>
 #include <openssl/sha.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "config.h"
@@ -13,6 +15,8 @@
 #include "rsa.h"
 #include "sock.h"
 #include "util.h"
+
+int receiver_acked = 0;
 
 int send_intention(int sender_fd, char *pub_key, size_t pub_len) {
   debug(sender_fd, "Send intention");
@@ -134,8 +138,10 @@ int receive_pub_key(int sender_fd, char *fname, char **pub_key,
   int status;
   // recv public key header
   debug(sender_fd, "Receive data public key header");
+
   packet_header_t header = malloc(HEADER_LENGTH);
   status = recv(sender_fd, header, HEADER_LENGTH, 0);
+  receiver_acked = 1;
   opcode_t opcode = get_opcode(header);
   payload_type_t payload_type = get_payload_type(header);
   *pub_len = get_payload_length(header);
@@ -146,6 +152,7 @@ int receive_pub_key(int sender_fd, char *fname, char **pub_key,
   }
 
   // recv public key
+  puts("");
   debug(sender_fd, "Receive data public key");
   packet_payload_t payload = malloc(GET_PAYLOAD_PACKET_LEN(*pub_len));
   status = recv(sender_fd, payload, GET_PAYLOAD_PACKET_LEN(*pub_len), 0);
@@ -298,6 +305,25 @@ int send_data(int sender_fd, char *fname, char *pub_key, size_t pub_len,
   return 0;
 }
 
+static void *timer(void *argp) {
+  long sender_fd = (long)argp;
+  struct timespec tt1, tt2;
+  clock_gettime(CLOCK_REALTIME, &tt1);
+  while (!receiver_acked) {
+    long pass_sec = tt2.tv_sec - tt1.tv_sec + 1;
+    clock_gettime(CLOCK_REALTIME, &tt2);
+    if (pass_sec > TIMEOUT_SEC) {
+      puts("");
+      fatal(sender_fd, "sender timout for waiting receiver");
+    }
+    printf("\rinfo:  session timout in %10ld seconds",
+           (TIMEOUT_SEC - pass_sec));
+    usleep(10000);
+    fflush(stdout);
+  }
+  return 0;
+}
+
 static void help() {
   printf("%-12s %-20s %-30s\n", "-h", "--help", "show this message");
   printf("%-12s %-20s %-30s\n", "-i [ip]", "--server-ip [ip]",
@@ -400,7 +426,12 @@ int main(int argc, char *argv[]) {
 
   char *data_pub_key;
   size_t data_pub_len;
+  
+  // timer for waiting receiver
   info(sender_fd, "Waiting for receiver...");
+  pthread_t thread;
+  pthread_create(&thread, NULL, timer, (void *)&sender_fd);
+  
   status = receive_pub_key(sender_fd, fname, &data_pub_key, &data_pub_len);
   if (status == -1) return -1;
 
