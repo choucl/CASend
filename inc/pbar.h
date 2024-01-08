@@ -4,7 +4,7 @@
 #include <stdlib.h>
 
 #define BLOCK_NUM 40
-extern int accumulated_sz;
+extern size_t accumulated_sz;
 extern int pbar_exit;
 void *progress_bar(void *argp);
 
