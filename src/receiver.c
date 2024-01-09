@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <getopt.h>
 #include <netinet/in.h>
+#include <omp.h>
 #include <openssl/sha.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -145,30 +146,14 @@ int request_transfer(int receiver_fd, char *input_code, char **fname,
   return 0;
 }
 
-int receive_data(int receiver_fd, char sha256_str[65], char *fname,
-                 char *directory, char *pri_key, size_t pri_len, char *pub_key,
-                 size_t pub_len) {
+int receive_data(int receiver_fd, FILE *ctext_file) {
   packet_header_t header;
   packet_payload_t payload;
   int status;
 
-  FILE *dst_file;
-  char *file_path = malloc(strlen(directory) + strlen(fname));
-  sprintf(file_path, "%s/%s", directory, fname);
-  dst_file = fopen(file_path, "wb");
-  if (dst_file == NULL) {
-    error(receiver_fd, "Fail opening destination file");
-    return -1;
-  }
-
   // Receive data
   size_t payload_buf_len = GET_PAYLOAD_PACKET_LEN(MAX_PAYLOAD_LEN);
 
-  unsigned char hash[SHA256_DIGEST_LENGTH];
-  SHA256_CTX sha256;
-  SHA256_Init(&sha256);
-
-  debug(receiver_fd, "Start file trasfer");
   while (1) {
     // Receive header
     header = malloc(HEADER_LENGTH);
@@ -199,31 +184,70 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname,
       error(receiver_fd, "Receive data failed");
       return -1;
     }
-
-    char ptext[MAX_PAYLOAD_LEN / 2];
-    size_t ptext_len = 0;
-    size_t ctext_chunk_len = 256;
-    char ctext_chunk[ctext_chunk_len];
-
-    int iter = ctext_len / ctext_chunk_len;
-
-    for (int i = 0; i < iter; i++) {
-      memcpy(ctext_chunk, ctext + ctext_chunk_len * i, ctext_chunk_len);
-      size_t ptext_chunk_len;
-      unsigned char *ptext_chunk =
-          decrypt(pri_key, pri_len, (const unsigned char *)ctext_chunk,
-                  ctext_chunk_len, &ptext_chunk_len);
-      memcpy(ptext + ptext_len, ptext_chunk, ptext_chunk_len);
-      ptext_len += ptext_chunk_len;
-    }
-    accumulated_sz += ptext_len;
-
-    SHA256_Update(&sha256, (char *)ptext, ptext_len);
-
-    fwrite(ptext, sizeof(char), ptext_len, dst_file);
+    accumulated_sz += ctext_len;
+    fwrite(ctext, 1, ctext_len, ctext_file);
   }
 
-  debug(receiver_fd, "Finish file transfer");
+  return 0;
+}
+
+int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
+                 size_t pri_len, char sha256_str[65], int num_thread,
+                 size_t *ptext_fsize) {
+  FILE *ptext_file;
+  char *file_path = malloc(strlen(directory) + strlen(fname));
+  sprintf(file_path, "%s/%s", directory, fname);
+  ptext_file = fopen(file_path, "wb");
+  if (ptext_file == NULL) {
+    error(0, "Fail opening destination file");
+    return -1;
+  }
+
+  unsigned char hash[SHA256_DIGEST_LENGTH];
+  SHA256_CTX sha256;
+  SHA256_Init(&sha256);
+
+  *ptext_fsize = 0;
+  int num_ctext_chunk = num_thread;
+  int max_ctext_len = num_thread * CTEXT_CHUNK_LEN;
+  char ctext[max_ctext_len];
+  char ptext[num_thread * MAX_PTEXT_CHUNK_LEN];
+  int finish_decrypt = 0;
+  omp_set_num_threads(num_thread);
+
+  while (1) {
+    size_t ctext_len = fread(ctext, 1, max_ctext_len, ctext_file);
+    size_t ptext_len = 0;
+
+    if (ctext_len == 0) break;
+
+    if (ctext_len < max_ctext_len) {
+      num_ctext_chunk = ctext_len / CTEXT_CHUNK_LEN;
+      finish_decrypt = 1;
+    }
+
+#pragma omp parallel
+    {
+      int tid = omp_get_thread_num();
+      if (tid < num_ctext_chunk) {
+        size_t ptext_chunk_len;
+        unsigned char *ptext_chunk =
+            decrypt(pri_key, pri_len,
+                    (const unsigned char *)(ctext + CTEXT_CHUNK_LEN * tid),
+                    CTEXT_CHUNK_LEN, &ptext_chunk_len);
+        memcpy(ptext + (MAX_PTEXT_CHUNK_LEN * tid), ptext_chunk, ptext_chunk_len);
+#pragma omp critical
+        ptext_len += ptext_chunk_len;
+      }
+    }
+    accumulated_sz += ctext_len;
+    *ptext_fsize += ptext_len;
+
+    SHA256_Update(&sha256, (char *)ptext, ptext_len);
+    fwrite(ptext, 1, ptext_len, ptext_file);
+
+    if (finish_decrypt == 1) break;
+  }
 
   SHA256_Final(hash, &sha256);
 
@@ -231,8 +255,13 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname,
     sprintf(sha256_str + (i * 2), "%02x", hash[i]);
   }
 
-  fclose(dst_file);
+  return 0;
+}
 
+int compare_checksum(int receiver_fd, char sha256_str[65]) {
+  packet_header_t header;
+  packet_payload_t payload;
+  int status;
   // recv SHA256
   debug(receiver_fd, "Receive SHA256 checksum");
   char *sha256_str_buf;
@@ -265,7 +294,6 @@ int receive_data(int receiver_fd, char sha256_str[65], char *fname,
     error(receiver_fd, "Finish failed");
     return -1;
   }
-
   return 0;
 }
 
@@ -279,17 +307,20 @@ static void help() {
          "directory to store transferred file, default: .");
   printf("%-16s %-24s %-30s\n", "-c [code]", "--code [code]",
          "file transfer code, enter interactive mode if not specified");
+  printf("%-16s %-24s %-30s\n", "-t [num-thread]", "--num-thread [num-thread]",
+         "number of thread for file decryption, default: 4");
 }
 
 int main(int argc, char *argv[]) {
   char *host = "localhost", *port = "8700", *directory = ".",
-       *input_code = NULL;
-  const char optstr[] = "hi:p:d:c:";
+       *input_code = NULL, *num_thread = "4";
+  const char optstr[] = "hi:p:d:t:c:";
   const static struct option long_options[] = {
       {"help", no_argument, 0, 'h'},
       {"server-ip", optional_argument, 0, 'i'},
       {"port", optional_argument, 0, 'p'},
       {"directory", optional_argument, 0, 'd'},
+      {"num-thread", optional_argument, 0, 't'},
       {"code", optional_argument, 0, 'c'}};
   int interactive = 1;
   while (1) {
@@ -308,6 +339,9 @@ int main(int argc, char *argv[]) {
         break;
       case 'd':
         directory = argv[optind - 1];
+        break;
+      case 't':
+        num_thread = argv[optind - 1];
         break;
       case 'c':
         interactive = 0;
@@ -347,6 +381,14 @@ int main(int argc, char *argv[]) {
     if (directory[0] == '\0') {
       sprintf(directory, ".");
     }
+    prompt(0, "Please specify number of threads, default = 4");
+    printf("-> ");
+    num_thread = malloc(sizeof(char) * 3);
+    num_thread = fgets(num_thread, 3, stdin);
+    num_thread[strlen(num_thread) - 1] = '\0';
+    if (num_thread[0] == '\0') {
+      sprintf(num_thread, "4");
+    }
     prompt(0, "Please specify file transfer code");
     printf("-> ");
     input_code = malloc(sizeof(char) * (CODE_LENGTH + 2));
@@ -379,26 +421,44 @@ int main(int argc, char *argv[]) {
   char *pub_key, *pri_key;
   size_t pub_len;
   size_t pri_len;
-  generate_keys(&pub_key, &pri_key, &pri_len, &pub_len);
+  status = generate_keys(&pub_key, &pri_key, &pri_len, &pub_len);
+  if (status == -1) return status;
 
   info(receiver_fd, "Request file transfer: %s", input_code);
+
   status = request_transfer(receiver_fd, input_code, &fname, &fsize, pub_key,
                             pub_len);
-  info(receiver_fd, "file size = %d", fsize);
+  info(receiver_fd, "Encrypted file size = %d", fsize);
 
   if (status == -1) return status;
-
   char sha256_str[65];
+  FILE *ctext_file = tmpfile();
   info(receiver_fd, "Start file transfer: %s/%s", directory, fname);
-  pthread_t thread;
-  pthread_create(&thread, NULL, progress_bar, (void *)fsize);
-  status = receive_data(receiver_fd, sha256_str, fname, directory, pri_key,
-                        pri_len, pub_key, pub_len);
-  while (!pbar_exit) asm("");
-  info(receiver_fd, "SHA256 checksum: %s", sha256_str);
 
+  pthread_t recv_pbar_thread;
+  pthread_create(&recv_pbar_thread, NULL, progress_bar, (void *)fsize);
+  status = receive_data(receiver_fd, ctext_file);
+  while (!pbar_exit) asm("");
+  info(receiver_fd, "Finish file transfer");
+  accumulated_sz = 0;
+
+  rewind(ctext_file);
+  info(0, "Start file decryption with %s threads", num_thread);
+  size_t ptext_fsize;
+  pthread_t decrypt_pbar_thread;
+  pthread_create(&decrypt_pbar_thread, NULL, progress_bar, (void *)fsize);
+  status = decrypt_file(ctext_file, fname, directory, pri_key, pri_len,
+                        sha256_str, atoi(num_thread), &ptext_fsize);
+  while (!pbar_exit) asm("");
+  fclose(ctext_file);
+  info(0, "Finish file decryption");
+  info(0, "File size = %zu", ptext_fsize);
   if (status == -1) return status;
-  info(receiver_fd, "Finish file transfer: %s/%s", directory, fname);
+
+  info(receiver_fd, "SHA256 checksum: %s", sha256_str);
+  status = compare_checksum(receiver_fd, sha256_str);
+  if (status == -1) return status;
+  info(receiver_fd, "Finish checksum checking");
 
   if (interactive) {
     free0(host);

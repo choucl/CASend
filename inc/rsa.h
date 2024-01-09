@@ -3,6 +3,9 @@
 
 #include <stdlib.h>
 
+#define MAX_PTEXT_CHUNK_LEN 214
+#define CTEXT_CHUNK_LEN 256
+
 // Generate RSA public / private key pairs
 // arguments:
 //   - unallocated char ** to store keys
