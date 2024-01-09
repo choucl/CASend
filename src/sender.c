@@ -100,8 +100,8 @@ int recv_code(int sender_fd, int *code, char *pri_key, size_t pri_len) {
               code_ctext_len, &code_ptext_len);
   memcpy(code, code_ptext, code_ptext_len);
 
-  info(sender_fd, "Get code %d", *code);
-
+  info(0, "Passcode = \033[30;47m %d \033[0m", *code);
+  info(0, "Please send the passcode to receiver to obtain data");
   return 0;
 }
 
