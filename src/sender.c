@@ -18,10 +18,10 @@
 #include "sock.h"
 #include "util.h"
 
-size_t get_fsize(char *fname) {
+size_t get_fsize(char *file_path) {
   FILE *fp;
   size_t sz;
-  fp = fopen(fname, "rb");
+  fp = fopen(file_path, "rb");
   if (fp != NULL) {
     fseek(fp, 0L, SEEK_END);
     sz = ftell(fp);
@@ -31,6 +31,24 @@ size_t get_fsize(char *fname) {
   }
   return sz;
 }
+
+char *get_fname(char *file_path) {
+  char *fname = malloc(strlen(file_path));
+  int slash_idx = 0;
+  for (int i = strlen(file_path) - 1; i > 0 ; i--) {
+    if (file_path[i] == '/') {
+      slash_idx = i;
+      break;
+    }
+  }
+  if (slash_idx) {
+    strncpy(fname, file_path + slash_idx + 1, strlen(file_path) - slash_idx - 1);
+    return fname;
+  } else {
+    return file_path;
+  }
+}
+
 int receiver_acked = 0;
 
 int send_intention(int sender_fd, char *pub_key, size_t pub_len) {
@@ -153,7 +171,7 @@ int register_new_transfer(int sender_fd, char *fname, char *pub_key,
   return 0;
 }
 
-int receive_pub_key(int sender_fd, char *fname, char **pub_key, size_t *pub_len,
+int receive_pub_key(int sender_fd, char *file_path, char **pub_key, size_t *pub_len,
                     size_t *fsize, size_t *send_fsize, int encrypt_on) {
   debug(sender_fd, "Receive pub key");
   int status;
@@ -196,7 +214,7 @@ int receive_pub_key(int sender_fd, char *fname, char **pub_key, size_t *pub_len,
   }
 
   packet_payload_t sz_payload;
-  *fsize = get_fsize(fname);
+  *fsize = get_fsize(file_path);
 
   if (encrypt_on) {
     *send_fsize = (*fsize % MAX_PTEXT_CHUNK_LEN == 0)
@@ -219,13 +237,13 @@ int receive_pub_key(int sender_fd, char *fname, char **pub_key, size_t *pub_len,
   return 0;
 }
 
-int preprocess_file(char *fname, FILE *dst_file, char *pub_key, size_t pub_len,
+int preprocess_file(char *file_path, FILE *dst_file, char *pub_key, size_t pub_len,
                     char sha256_str[65], int encrypt_on, int num_thread) {
   FILE *src_file;
-  src_file = fopen(fname, "rb");
+  src_file = fopen(file_path, "rb");
 
   if (src_file == NULL) {
-    error(0, "Fail opening source file: %s", fname);
+    error(0, "Fail opening source file: %s", file_path);
     return -1;
   }
 
@@ -417,7 +435,7 @@ static void help() {
 }
 
 int main(int argc, char *argv[]) {
-  char *host = "localhost", *port = "8700", *fname = NULL, *num_thread = "4";
+  char *host = "localhost", *port = "8700", *file_path = NULL, *num_thread = "4";
   int encrypt_on = 0;
   const char optstr[] = "hei:p:t:f:";
   const static struct option long_options[] = {
@@ -450,7 +468,7 @@ int main(int argc, char *argv[]) {
         break;
       case 'f':
         interactive = 0;
-        fname = argv[optind - 1];
+        file_path = argv[optind - 1];
         break;
       default:
         help();
@@ -507,11 +525,11 @@ int main(int argc, char *argv[]) {
     }
     prompt(0, "Please specify file name to transfer");
     printf("-> ");
-    fname = malloc(sizeof(char) * 32);
-    fname = fgets(fname, 32, stdin);
-    fname[strlen(fname) - 1] = '\0';
-    if (fname[0] == '\0') {
-      fatal(0, "fname not specified");
+    file_path = malloc(sizeof(char) * 32);
+    file_path = fgets(file_path, 32, stdin);
+    file_path[strlen(file_path) - 1] = '\0';
+    if (file_path[0] == '\0') {
+      fatal(0, "file_path not specified");
     }
   }
 
@@ -545,6 +563,8 @@ int main(int argc, char *argv[]) {
     generate_keys(&code_pub_key, &code_pri_key, &code_pri_len, &code_pub_len);
 
   info(sender_fd, "Register new file transfer");
+  char *fname = get_fname(file_path);
+  info(sender_fd, "File name: %s", fname);
   status = register_new_transfer(sender_fd, fname, code_pub_key, code_pub_len,
                                  code_pri_key, code_pri_len);
   if (status == -1) return -1;
@@ -559,7 +579,7 @@ int main(int argc, char *argv[]) {
   pthread_create(&timer_thread, NULL, timer, (void *)&sender_fd);
 
   // Receive pub key from receiver no matter encryption is on or off
-  status = receive_pub_key(sender_fd, fname, &data_pub_key, &data_pub_len,
+  status = receive_pub_key(sender_fd, file_path, &data_pub_key, &data_pub_len,
                            &fsize, &ctext_fsize, encrypt_on);
   if (status == -1) return -1;
 
@@ -570,7 +590,7 @@ int main(int argc, char *argv[]) {
   info(0, "Start file preprocess");
   pthread_t encrypt_pbar_thread;
   pthread_create(&encrypt_pbar_thread, NULL, progress_bar, (void *)fsize);
-  status = preprocess_file(fname, tmp_file, data_pub_key, data_pub_len,
+  status = preprocess_file(file_path, tmp_file, data_pub_key, data_pub_len,
                            sha256_str, encrypt_on, atoi(num_thread));
   while (!pbar_exit) asm("");
   accumulated_sz = 0;
@@ -580,7 +600,7 @@ int main(int argc, char *argv[]) {
 
   // Send file
   rewind(tmp_file);
-  info(sender_fd, "Start file transfer %s", fname);
+  info(sender_fd, "Start file transfer %s", file_path);
   pthread_t send_pbar_thread;
   pthread_create(&send_pbar_thread, NULL, progress_bar, (void *)ctext_fsize);
   status = send_data(sender_fd, tmp_file, encrypt_on);
@@ -588,7 +608,7 @@ int main(int argc, char *argv[]) {
   accumulated_sz = 0;
   pbar_exit = 0;
   fclose(tmp_file);
-  info(sender_fd, "Finish file transfer %s", fname);
+  info(sender_fd, "Finish file transfer %s", file_path);
 
   info(sender_fd, "SHA256 checksum: %s", sha256_str);
   status = send_checksum(sender_fd, sha256_str);
@@ -597,7 +617,8 @@ int main(int argc, char *argv[]) {
   if (interactive) {
     free0(host);
     free0(port);
-    free0(fname);
+    free0(file_path);
   }
+  info(sender_fd, "Complete file transfer, exit program");
   return 0;
 }

@@ -272,6 +272,7 @@ int postprocess_file(FILE *tmp_file, char *fname, char *directory,
     }
   }
 
+  fclose(ptext_file);
   SHA256_Final(hash, &sha256);
 
   for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
@@ -495,5 +496,6 @@ int main(int argc, char *argv[]) {
     free0(directory);
     free0(input_code);
   }
+  info(receiver_fd, "Complete file transfer, exit program");
   return 0;
 }
