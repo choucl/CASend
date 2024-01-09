@@ -147,7 +147,8 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
   // receive name header
   packet_header_t recv_name_header = malloc(HEADER_LENGTH);
   status = recv(clientfd, recv_name_header, HEADER_LENGTH, 0);
-  if (status <= 0 || check_header_op(recv_name_header, kOpData) <= 0) {
+  if (status <= 0 || ((check_header_op(recv_name_header, kOpPText) <= 0) &&
+                      (check_header_op(recv_name_header, kOpCText) <= 0))) {
     error(clientfd, "recv name header failed");
     return -1;
   }
