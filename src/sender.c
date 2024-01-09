@@ -457,8 +457,8 @@ int main(int argc, char *argv[]) {
     }
     prompt(0, "Please specify number of threads, default = 4");
     printf("-> ");
-    num_thread = malloc(sizeof(char) * 3);
-    num_thread = fgets(num_thread, 3, stdin);
+    num_thread = malloc(sizeof(char) * 5);
+    num_thread = fgets(num_thread, 5, stdin);
     num_thread[strlen(num_thread) - 1] = '\0';
     if (num_thread[0] == '\0') {
       sprintf(num_thread, "4");
