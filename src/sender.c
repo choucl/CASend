@@ -404,29 +404,27 @@ static void *timer(void *argp) {
 
 static void help() {
   printf("%-12s %-20s %-30s\n", "-h", "--help", "show this message");
+  printf("%-12s %-20s %-30s\n", "-e", "--encrypt",
+         "enable RSA encryption for file transfer, default: off");
   printf("%-12s %-20s %-30s\n", "-i [ip]", "--server-ip [ip]",
          "specify server domain, default: localhost");
   printf("%-12s %-20s %-30s\n", "-p [port]", "--port [port]",
          "specify server port, default: 8700");
-  printf("%-16s %-24s %-30s\n", "-e [encrypt-option]",
-         "--encrypt-option [encrypt-option]",
-         "using RSA encryption for file transfer, default: off");
-  printf(
-      "%-16s %-24s %-30s\n", "-t [num-thread]", "--num-thread [num-thread]",
-      "number of thread for file decryption, 0 for no encryption, default: 0");
+  printf("%-16s %-20s %-30s\n", "-t [threads]", "--num-thread [threads]",
+         "number of thread for file decryption, default: 0");
   printf("%-12s %-20s %-30s\n", "-f [file]", "--file [file]",
          "file name to transfer, enter interactive mode if not specified");
 }
 
 int main(int argc, char *argv[]) {
   char *host = "localhost", *port = "8700", *fname = NULL, *num_thread = "4",
-       *encrypt_option = "off";
-  const char optstr[] = "hi:p:e:t:f:";
+       encrypt_on = 0;
+  const char optstr[] = "hei:p:t:f:";
   const static struct option long_options[] = {
       {"help", no_argument, 0, 'h'},
+      {"encrypt", no_argument, 0, 'e'},
       {"server-ip", optional_argument, 0, 'i'},
       {"port", optional_argument, 0, 'p'},
-      {"encrypt_option", optional_argument, 0, 'e'},
       {"num-thread", optional_argument, 0, 't'},
       {"file", optional_argument, 0, 'f'}};
   int interactive = 1;
@@ -445,12 +443,7 @@ int main(int argc, char *argv[]) {
         port = argv[optind - 1];
         break;
       case 'e':
-        encrypt_option = argv[optind - 1];
-        if (strncmp(encrypt_option, "off", 3) != 0 &&
-            strncmp(encrypt_option, "on", 2) != 0) {
-          printf("encrypt option must be \"on\" or \"off\"\n");
-          return -1;
-        }
+        encrypt_on = 1;
         break;
       case 't':
         num_thread = argv[optind - 1];
@@ -485,20 +478,25 @@ int main(int argc, char *argv[]) {
     if (port[0] == '\0') {
       sprintf(port, "8700");
     }
-    prompt(0, "Please specify encrypt option, default = off");
-    printf("-> ");
-
-    encrypt_option = malloc(sizeof(char) * 3);
-    encrypt_option = fgets(encrypt_option, 3, stdin);
-    encrypt_option[strlen(port) - 1] = '\0';
-    if (encrypt_option[0] == '\0') {
-      sprintf(encrypt_option, "off");
-    }
-    if (strncmp(encrypt_option, "off", 3) != 0 &&
-        strncmp(encrypt_option, "on", 2) != 0) {
-      printf("encrypt option must be \"on\" or \"off\"\n");
-      return -1;
-    }
+    prompt(0, "Enable specify encrypt option, y/N");
+    char encrypt_opt[3];
+    int legal_input;
+    do {
+      legal_input = 1;
+      printf("-> ");
+      fgets(encrypt_opt, 3, stdin);
+      switch (encrypt_opt[0]) {
+        case 'y':
+        case 'Y':
+          encrypt_on = 1;
+        case 'n':
+        case 'N':
+        case '\n':
+          encrypt_on = 0;
+        default:
+          legal_input = 0;
+      }
+    } while (!legal_input);
     prompt(0, "Please specify number of threads, default = 4");
     printf("-> ");
     num_thread = malloc(sizeof(char) * 3);
@@ -523,6 +521,12 @@ int main(int argc, char *argv[]) {
     info(0, "Input host: %s, port: %s", host, port);
   }
 
+  if (encrypt_on) {
+    info(0, "RSA Encryption enabled");
+  } else {
+    info(0, "RSA Encryption disabled");
+  }
+
   int sender_fd __attribute__((unused)) = open_clientfd(host, port);
   if (sender_fd == -1) {
     error(0, "Client file descriptor open failed");
@@ -536,8 +540,6 @@ int main(int argc, char *argv[]) {
 
   char *code_pub_key = "\0", *code_pri_key = "\0";
   size_t code_pub_len = 0, code_pri_len = 0;
-
-  int encrypt_on = strncmp(encrypt_option, "on", 2) == 0 ? 1 : 0;
 
   if (encrypt_on)
     generate_keys(&code_pub_key, &code_pri_key, &code_pri_len, &code_pub_len);
