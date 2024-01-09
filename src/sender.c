@@ -489,10 +489,12 @@ int main(int argc, char *argv[]) {
         case 'y':
         case 'Y':
           encrypt_on = 1;
+          break;
         case 'n':
         case 'N':
         case '\n':
           encrypt_on = 0;
+          break;
         default:
           legal_input = 0;
       }
