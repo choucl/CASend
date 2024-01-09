@@ -208,6 +208,7 @@ int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
   SHA256_CTX sha256;
   SHA256_Init(&sha256);
 
+  size_t ptext_file_size = 0;
   int num_ctext_chunk = num_thread;
   size_t ctext_chunk_len = 256;
   int max_ctext_len = num_thread * ctext_chunk_len;
@@ -242,6 +243,7 @@ int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
       }
     }
     accumulated_sz += ctext_len;
+    ptext_file_size += ptext_len;
 
     SHA256_Update(&sha256, (char *)ptext, ptext_len);
     fwrite(ptext, 1, ptext_len, ptext_file);
@@ -250,6 +252,7 @@ int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
   }
 
   info(0, "Finish file decryption");
+  info(0, "File size = %d", ptext_file_size);
   SHA256_Final(hash, &sha256);
 
   for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
@@ -259,7 +262,7 @@ int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
   return 0;
 }
 
-int compare_check_sum(int receiver_fd, char sha256_str[65]) {
+int compare_checksum(int receiver_fd, char sha256_str[65]) {
   packet_header_t header;
   packet_payload_t payload;
   int status;
@@ -382,7 +385,7 @@ int main(int argc, char *argv[]) {
     if (directory[0] == '\0') {
       sprintf(directory, ".");
     }
-    prompt(0, "Please specify number of threads");
+    prompt(0, "Please specify number of threads, default = 4");
     printf("-> ");
     num_thread = malloc(sizeof(char) * 3);
     num_thread = fgets(num_thread, 3, stdin);
@@ -429,7 +432,7 @@ int main(int argc, char *argv[]) {
 
   status = request_transfer(receiver_fd, input_code, &fname, &fsize, pub_key,
                             pub_len);
-  info(receiver_fd, "file size = %d", fsize);
+  info(receiver_fd, "Encrypted file size = %d", fsize);
 
   if (status == -1) return status;
   char sha256_str[65];
@@ -452,7 +455,7 @@ int main(int argc, char *argv[]) {
   if (status == -1) return status;
 
   info(receiver_fd, "SHA256 checksum: %s", sha256_str);
-  status = compare_check_sum(receiver_fd, sha256_str);
+  status = compare_checksum(receiver_fd, sha256_str);
   if (status == -1) return status;
   info(receiver_fd, "Finish file transfer: %s/%s", directory, fname);
 

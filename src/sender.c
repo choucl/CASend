@@ -335,7 +335,7 @@ int send_data(int sender_fd, FILE *ctext_file) {
   return 0;
 }
 
-int compare_check_sum(int sender_fd, char sha256_str[65]) {
+int send_checksum(int sender_fd, char sha256_str[65]) {
   int status;
   packet_header_t header;
   packet_payload_t payload;
@@ -461,7 +461,7 @@ int main(int argc, char *argv[]) {
     if (port[0] == '\0') {
       sprintf(port, "8700");
     }
-    prompt(0, "Please specify number of threads");
+    prompt(0, "Please specify number of threads, default = 4");
     printf("-> ");
     num_thread = malloc(sizeof(char) * 3);
     num_thread = fgets(num_thread, 3, stdin);
@@ -537,7 +537,7 @@ int main(int argc, char *argv[]) {
   fclose(ctext_file);
 
   info(sender_fd, "SHA256 checksum: %s", sha256_str);
-  status = compare_check_sum(sender_fd, sha256_str);
+  status = send_checksum(sender_fd, sha256_str);
   if (status == -1) return -1;
 
   info(sender_fd, "Finish file transfer %s", fname);
