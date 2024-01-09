@@ -192,7 +192,8 @@ int receive_data(int receiver_fd, FILE *ctext_file) {
 }
 
 int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
-                 size_t pri_len, char sha256_str[65], int num_thread) {
+                 size_t pri_len, char sha256_str[65], int num_thread,
+                 size_t *ptext_fsize) {
   FILE *ptext_file;
   char *file_path = malloc(strlen(directory) + strlen(fname));
   sprintf(file_path, "%s/%s", directory, fname);
@@ -202,13 +203,11 @@ int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
     return -1;
   }
 
-  info(0, "Start file decryption with %d threads", num_thread);
-
   unsigned char hash[SHA256_DIGEST_LENGTH];
   SHA256_CTX sha256;
   SHA256_Init(&sha256);
 
-  size_t ptext_file_size = 0;
+  *ptext_fsize = 0;
   int num_ctext_chunk = num_thread;
   size_t ctext_chunk_len = 256;
   int max_ctext_len = num_thread * ctext_chunk_len;
@@ -243,7 +242,7 @@ int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
       }
     }
     accumulated_sz += ctext_len;
-    ptext_file_size += ptext_len;
+    *ptext_fsize += ptext_len;
 
     SHA256_Update(&sha256, (char *)ptext, ptext_len);
     fwrite(ptext, 1, ptext_len, ptext_file);
@@ -251,8 +250,6 @@ int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
     if (finish_decrypt == 1) break;
   }
 
-  info(0, "Finish file decryption");
-  info(0, "File size = %d", ptext_file_size);
   SHA256_Final(hash, &sha256);
 
   for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
@@ -443,21 +440,26 @@ int main(int argc, char *argv[]) {
   pthread_create(&recv_pbar_thread, NULL, progress_bar, (void *)fsize);
   status = receive_data(receiver_fd, ctext_file);
   while (!pbar_exit) asm("");
+  info(receiver_fd, "Finish file transfer");
   accumulated_sz = 0;
 
   rewind(ctext_file);
+  info(0, "Start file decryption with %s threads", num_thread);
+  size_t ptext_fsize;
   pthread_t decrypt_pbar_thread;
   pthread_create(&decrypt_pbar_thread, NULL, progress_bar, (void *)fsize);
   status = decrypt_file(ctext_file, fname, directory, pri_key, pri_len,
-                        sha256_str, atoi(num_thread));
+                        sha256_str, atoi(num_thread), &ptext_fsize);
   while (!pbar_exit) asm("");
   fclose(ctext_file);
+  info(0, "Finish file decryption");
+  info(0, "File size = %zu", ptext_fsize);
   if (status == -1) return status;
 
   info(receiver_fd, "SHA256 checksum: %s", sha256_str);
   status = compare_checksum(receiver_fd, sha256_str);
   if (status == -1) return status;
-  info(receiver_fd, "Finish file transfer: %s/%s", directory, fname);
+  info(receiver_fd, "Finish checksum checking");
 
   if (interactive) {
     free0(host);

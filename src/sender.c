@@ -148,7 +148,7 @@ int register_new_transfer(int sender_fd, char *fname, char *pub_key,
 }
 
 int receive_pub_key(int sender_fd, char *fname, char **pub_key, size_t *pub_len,
-                    size_t *fsize, size_t *ctext_size) {
+                    size_t *fsize, size_t *ctext_fsize) {
   debug(sender_fd, "Receive pub key");
   int status;
   // recv public key header
@@ -192,11 +192,11 @@ int receive_pub_key(int sender_fd, char *fname, char **pub_key, size_t *pub_len,
   packet_payload_t sz_payload;
   *fsize = get_fsize(fname);
 
-  *ctext_size = (*fsize % 128 == 0) ? (*fsize / 128) : (*fsize / 128) + 1;
-  *ctext_size *= 256;
+  *ctext_fsize = (*fsize % 128 == 0) ? (*fsize / 128) : (*fsize / 128) + 1;
+  *ctext_fsize *= 256;
 
   int sz_payload_len = GET_PAYLOAD_PACKET_LEN(sizeof(size_t));
-  create_payload(&sz_payload, 0, sizeof(size_t), (char *)ctext_size);
+  create_payload(&sz_payload, 0, sizeof(size_t), (char *)ctext_fsize);
   status = send(sender_fd, sz_payload, sz_payload_len, 0);
   free(sz_payload);
   if (status == -1) {
@@ -216,8 +216,6 @@ int encrypt_file(char *fname, FILE *ctext_file, char *pub_key, size_t pub_len,
     error(0, "Fail opening source file: %s", fname);
     return -1;
   }
-
-  info(0, "Start file encryption with %d threads", num_thread);
 
   unsigned char hash[SHA256_DIGEST_LENGTH];
   SHA256_CTX sha256;
@@ -280,8 +278,6 @@ int encrypt_file(char *fname, FILE *ctext_file, char *pub_key, size_t pub_len,
     if (finish_encrypt == 1) break;
   }
 
-  info(0, "Finish file encryption");
-
   SHA256_Final(hash, &sha256);
 
   for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
@@ -294,7 +290,6 @@ int encrypt_file(char *fname, FILE *ctext_file, char *pub_key, size_t pub_len,
 }
 
 int send_data(int sender_fd, FILE *ctext_file) {
-  info(sender_fd, "Start file transfer");
   int status;
   packet_header_t header;
   packet_payload_t payload;
@@ -506,7 +501,7 @@ int main(int argc, char *argv[]) {
                                  code_pri_key, code_pri_len);
   if (status == -1) return -1;
 
-  size_t fsize, ctext_size;
+  size_t fsize, ctext_fsize;
   char *data_pub_key;
   size_t data_pub_len;
 
@@ -515,32 +510,33 @@ int main(int argc, char *argv[]) {
   pthread_t timer_thread;
   pthread_create(&timer_thread, NULL, timer, (void *)&sender_fd);
   status = receive_pub_key(sender_fd, fname, &data_pub_key, &data_pub_len,
-                           &fsize, &ctext_size);
+                           &fsize, &ctext_fsize);
   if (status == -1) return -1;
 
-  pthread_t encrypt_pbar_thread;
-  pthread_create(&encrypt_pbar_thread, NULL, progress_bar, (void *)fsize);
   FILE *ctext_file = tmpfile();
   char sha256_str[65];
+  info(0, "Start file encryption with %s threads", num_thread);
+  pthread_t encrypt_pbar_thread;
+  pthread_create(&encrypt_pbar_thread, NULL, progress_bar, (void *)fsize);
   status = encrypt_file(fname, ctext_file, data_pub_key, data_pub_len,
                         sha256_str, atoi(num_thread));
   while (!pbar_exit) asm("");
+  info(0, "Finish file encryption");
   if (status == -1) return -1;
+
   rewind(ctext_file);
   info(sender_fd, "Start file transfer %s", fname);
-
   accumulated_sz = 0;
   pthread_t send_pbar_thread;
-  pthread_create(&send_pbar_thread, NULL, progress_bar, (void *)ctext_size);
+  pthread_create(&send_pbar_thread, NULL, progress_bar, (void *)ctext_fsize);
   status = send_data(sender_fd, ctext_file);
   while (!pbar_exit) asm("");
   fclose(ctext_file);
+  info(sender_fd, "Finish file transfer %s", fname);
 
   info(sender_fd, "SHA256 checksum: %s", sha256_str);
   status = send_checksum(sender_fd, sha256_str);
   if (status == -1) return -1;
-
-  info(sender_fd, "Finish file transfer %s", fname);
 
   if (interactive) {
     free0(host);
