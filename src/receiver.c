@@ -330,7 +330,7 @@ static void help() {
          "directory to store transferred file, default: .");
   printf("%-16s %-24s %-30s\n", "-c [code]", "--code [code]",
          "file transfer code, enter interactive mode if not specified");
-  printf("%-16s %-24s %-30s\n", "-t [num-thread]", "--num-thread [num-thread]",
+  printf("%-16s %-24s %-30s\n", "-t [threads]", "--num-thread [threads]",
          "number of thread for file decryption, default: 4");
 }
 
