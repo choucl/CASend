@@ -146,7 +146,7 @@ int request_transfer(int receiver_fd, char *input_code, char **fname,
   return 0;
 }
 
-int receive_data(int receiver_fd, FILE *ctext_file) {
+int receive_data(int receiver_fd, FILE *dst_file, int *encrypt_on) {
   packet_header_t header;
   packet_payload_t payload;
   int status;
@@ -154,14 +154,16 @@ int receive_data(int receiver_fd, FILE *ctext_file) {
   // Receive data
   size_t payload_buf_len = GET_PAYLOAD_PACKET_LEN(MAX_PAYLOAD_LEN);
 
+  int set_encrypt = 0;
+
   while (1) {
     // Receive header
     header = malloc(HEADER_LENGTH);
     status = retry_recv(receiver_fd, header, HEADER_LENGTH, 0);
     opcode_t opcode = get_opcode(header);
     payload_type_t payload_type = get_payload_type(header);
-    size_t ctext_len = get_payload_length(header);
-    payload_buf_len = GET_PAYLOAD_PACKET_LEN(ctext_len);
+    size_t recv_data_len = get_payload_length(header);
+    payload_buf_len = GET_PAYLOAD_PACKET_LEN(recv_data_len);
     free(header);
 
     if (status == -1) {
@@ -169,31 +171,40 @@ int receive_data(int receiver_fd, FILE *ctext_file) {
       return -1;
     } else if (opcode == kOpFin && payload_type == kHash) {
       break;
-    } else if (opcode != kOpData || payload_type != kData) {
+    } else if ((opcode != kOpCText && opcode != kOpPText) ||
+               payload_type != kData) {
       error(receiver_fd, "Receive data header failed");
       return -1;
     }
 
+    if (set_encrypt == 0) {
+      set_encrypt = 1;
+      if (opcode == kOpCText)
+        *encrypt_on = 1;
+      else
+        *encrypt_on = 0;
+    }
+
     // Receive data
-    char *ctext;
+    char *recv_data;
     payload = malloc(payload_buf_len);
     status = retry_recv(receiver_fd, payload, payload_buf_len, 0);
-    copy_payload(payload, &ctext);
+    copy_payload(payload, &recv_data);
     free(payload);
     if (status == -1) {
       error(receiver_fd, "Receive data failed");
       return -1;
     }
-    accumulated_sz += ctext_len;
-    fwrite(ctext, 1, ctext_len, ctext_file);
+    accumulated_sz += recv_data_len;
+    fwrite(recv_data, 1, recv_data_len, dst_file);
   }
 
   return 0;
 }
 
-int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
-                 size_t pri_len, char sha256_str[65], int num_thread,
-                 size_t *ptext_fsize) {
+int postprocess_file(FILE *tmp_file, char *fname, char *directory,
+                     char *pri_key, size_t pri_len, char sha256_str[65],
+                     int num_thread, size_t *ptext_fsize, int encrypt_on) {
   FILE *ptext_file;
   char *file_path = malloc(strlen(directory) + strlen(fname));
   sprintf(file_path, "%s/%s", directory, fname);
@@ -207,46 +218,58 @@ int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
   SHA256_CTX sha256;
   SHA256_Init(&sha256);
 
-  *ptext_fsize = 0;
-  int num_ctext_chunk = num_thread;
-  int max_ctext_len = num_thread * CTEXT_CHUNK_LEN;
-  char ctext[max_ctext_len];
-  char ptext[num_thread * MAX_PTEXT_CHUNK_LEN];
-  int finish_decrypt = 0;
-  omp_set_num_threads(num_thread);
+  if (encrypt_on) {
+    *ptext_fsize = 0;
+    int num_ctext_chunk = num_thread;
+    int max_ctext_len = num_thread * CTEXT_CHUNK_LEN;
+    char ctext[max_ctext_len];
+    char ptext[num_thread * MAX_PTEXT_CHUNK_LEN];
+    int finish_decrypt = 0;
+    omp_set_num_threads(num_thread);
 
-  while (1) {
-    size_t ctext_len = fread(ctext, 1, max_ctext_len, ctext_file);
-    size_t ptext_len = 0;
+    while (1) {
+      size_t ctext_len = fread(ctext, 1, max_ctext_len, tmp_file);
+      size_t ptext_len = 0;
 
-    if (ctext_len == 0) break;
+      if (ctext_len == 0) break;
 
-    if (ctext_len < max_ctext_len) {
-      num_ctext_chunk = ctext_len / CTEXT_CHUNK_LEN;
-      finish_decrypt = 1;
-    }
+      if (ctext_len < max_ctext_len) {
+        num_ctext_chunk = ctext_len / CTEXT_CHUNK_LEN;
+        finish_decrypt = 1;
+      }
 
 #pragma omp parallel
-    {
-      int tid = omp_get_thread_num();
-      if (tid < num_ctext_chunk) {
-        size_t ptext_chunk_len;
-        unsigned char *ptext_chunk =
-            decrypt(pri_key, pri_len,
-                    (const unsigned char *)(ctext + CTEXT_CHUNK_LEN * tid),
-                    CTEXT_CHUNK_LEN, &ptext_chunk_len);
-        memcpy(ptext + (MAX_PTEXT_CHUNK_LEN * tid), ptext_chunk, ptext_chunk_len);
+      {
+        int tid = omp_get_thread_num();
+        if (tid < num_ctext_chunk) {
+          size_t ptext_chunk_len;
+          unsigned char *ptext_chunk =
+              decrypt(pri_key, pri_len,
+                      (const unsigned char *)(ctext + CTEXT_CHUNK_LEN * tid),
+                      CTEXT_CHUNK_LEN, &ptext_chunk_len);
+          memcpy(ptext + (MAX_PTEXT_CHUNK_LEN * tid), ptext_chunk,
+                 ptext_chunk_len);
 #pragma omp critical
-        ptext_len += ptext_chunk_len;
+          ptext_len += ptext_chunk_len;
+        }
       }
+      accumulated_sz += ctext_len;
+      *ptext_fsize += ptext_len;
+
+      SHA256_Update(&sha256, (char *)ptext, ptext_len);
+      fwrite(ptext, 1, ptext_len, ptext_file);
+
+      if (finish_decrypt == 1) break;
     }
-    accumulated_sz += ctext_len;
-    *ptext_fsize += ptext_len;
-
-    SHA256_Update(&sha256, (char *)ptext, ptext_len);
-    fwrite(ptext, 1, ptext_len, ptext_file);
-
-    if (finish_decrypt == 1) break;
+  } else {
+    char recv_data[MAX_PAYLOAD_LEN];
+    while (1) {
+      size_t recv_data_len = fread(recv_data, 1, MAX_PAYLOAD_LEN, tmp_file);
+      SHA256_Update(&sha256, (char *)recv_data, recv_data_len);
+      fwrite(recv_data, 1, recv_data_len, ptext_file);
+      accumulated_sz += recv_data_len;
+      if (recv_data_len < MAX_PAYLOAD_LEN) break;
+    }
   }
 
   SHA256_Final(hash, &sha256);
@@ -432,26 +455,32 @@ int main(int argc, char *argv[]) {
 
   if (status == -1) return status;
   char sha256_str[65];
-  FILE *ctext_file = tmpfile();
+  FILE *tmp_file = tmpfile();
   info(receiver_fd, "Start file transfer: %s/%s", directory, fname);
+
+  int encrypt_on = 1;
 
   pthread_t recv_pbar_thread;
   pthread_create(&recv_pbar_thread, NULL, progress_bar, (void *)fsize);
-  status = receive_data(receiver_fd, ctext_file);
+  status = receive_data(receiver_fd, tmp_file, &encrypt_on);
   while (!pbar_exit) asm("");
-  info(receiver_fd, "Finish file transfer");
   accumulated_sz = 0;
+  pbar_exit = 0;
+  info(receiver_fd, "Finish file transfer");
 
-  rewind(ctext_file);
-  info(0, "Start file decryption with %s threads", num_thread);
+  rewind(tmp_file);
+  info(0, "Start file postprocess");
   size_t ptext_fsize;
   pthread_t decrypt_pbar_thread;
   pthread_create(&decrypt_pbar_thread, NULL, progress_bar, (void *)fsize);
-  status = decrypt_file(ctext_file, fname, directory, pri_key, pri_len,
-                        sha256_str, atoi(num_thread), &ptext_fsize);
+  status =
+      postprocess_file(tmp_file, fname, directory, pri_key, pri_len, sha256_str,
+                       atoi(num_thread), &ptext_fsize, encrypt_on);
   while (!pbar_exit) asm("");
-  fclose(ctext_file);
-  info(0, "Finish file decryption");
+  accumulated_sz = 0;
+  pbar_exit = 0;
+  fclose(tmp_file);
+  info(0, "Finish file postprocess");
   info(0, "File size = %zu", ptext_fsize);
   if (status == -1) return status;
 

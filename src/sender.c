@@ -94,11 +94,17 @@ int recv_code(int sender_fd, int *code, char *pri_key, size_t pri_len) {
     return -1;
   }
 
-  size_t code_ptext_len;
-  unsigned char *code_ptext =
-      decrypt(pri_key, pri_len, (const unsigned char *)code_ctext,
-              code_ctext_len, &code_ptext_len);
-  memcpy(code, code_ptext, code_ptext_len);
+  if (pri_len > 0) {  // encrypted
+    debug(sender_fd, "encrypt code");
+    size_t code_ptext_len;
+    unsigned char *code_ptext =
+        decrypt(pri_key, pri_len, (const unsigned char *)code_ctext,
+                code_ctext_len, &code_ptext_len);
+    memcpy(code, code_ptext, code_ptext_len);
+  } else {
+    debug(sender_fd, "plain code");
+    memcpy(code, code_ctext, sizeof(int));
+  }
 
   info(sender_fd, "Get code %d", *code);
 
@@ -113,7 +119,7 @@ int send_fname(int sender_fd, char *fname) {
   // send file name header
   debug(sender_fd, "Send file name header");
   size_t name_length = strlen(fname) + 1;
-  create_header(&header, kOpData, kData, name_length);
+  create_header(&header, kOpPText, kData, name_length);
   status = send(sender_fd, header, HEADER_LENGTH, 0);
   free(header);
   if (status == -1) {
@@ -148,7 +154,7 @@ int register_new_transfer(int sender_fd, char *fname, char *pub_key,
 }
 
 int receive_pub_key(int sender_fd, char *fname, char **pub_key, size_t *pub_len,
-                    size_t *fsize, size_t *ctext_fsize) {
+                    size_t *fsize, size_t *send_fsize, int encrypt_on) {
   debug(sender_fd, "Receive pub key");
   int status;
   // recv public key header
@@ -192,11 +198,17 @@ int receive_pub_key(int sender_fd, char *fname, char **pub_key, size_t *pub_len,
   packet_payload_t sz_payload;
   *fsize = get_fsize(fname);
 
-  *ctext_fsize = (*fsize % MAX_PTEXT_CHUNK_LEN == 0) ? (*fsize / MAX_PTEXT_CHUNK_LEN) : (*fsize / MAX_PTEXT_CHUNK_LEN) + 1;
-  *ctext_fsize *= CTEXT_CHUNK_LEN;
+  if (encrypt_on) {
+    *send_fsize = (*fsize % MAX_PTEXT_CHUNK_LEN == 0)
+                      ? (*fsize / MAX_PTEXT_CHUNK_LEN)
+                      : (*fsize / MAX_PTEXT_CHUNK_LEN) + 1;
+    *send_fsize *= CTEXT_CHUNK_LEN;
+  } else {
+    *send_fsize = *fsize;
+  }
 
   int sz_payload_len = GET_PAYLOAD_PACKET_LEN(sizeof(size_t));
-  create_payload(&sz_payload, 0, sizeof(size_t), (char *)ctext_fsize);
+  create_payload(&sz_payload, 0, sizeof(size_t), (char *)send_fsize);
   status = send(sender_fd, sz_payload, sz_payload_len, 0);
   free(sz_payload);
   if (status == -1) {
@@ -207,8 +219,8 @@ int receive_pub_key(int sender_fd, char *fname, char **pub_key, size_t *pub_len,
   return 0;
 }
 
-int encrypt_file(char *fname, FILE *ctext_file, char *pub_key, size_t pub_len,
-                 char sha256_str[65], int num_thread) {
+int preprocess_file(char *fname, FILE *dst_file, char *pub_key, size_t pub_len,
+                    char sha256_str[65], int encrypt_on, int num_thread) {
   FILE *src_file;
   src_file = fopen(fname, "rb");
 
@@ -249,30 +261,35 @@ int encrypt_file(char *fname, FILE *ctext_file, char *pub_key, size_t pub_len,
     }
     accumulated_sz += ptext_len;
 
+    if (encrypt_on) {
 #pragma omp parallel
-    {
-      int tid = omp_get_thread_num();
-      if (tid < num_ptext_chunk) {
-        size_t ctext_chunk_len = 0;
-        unsigned char *ctext_chunk;
-        if (finish_encrypt == 1 && tid == num_ptext_chunk - 1) {
-          ctext_chunk =
-              encrypt(pub_key, pub_len,
-                      (const unsigned char *)(ptext + MAX_PTEXT_CHUNK_LEN * tid),
-                      last_ptext_chunk_len, &ctext_chunk_len);
+      {
+        int tid = omp_get_thread_num();
+        if (tid < num_ptext_chunk) {
+          size_t ctext_chunk_len = 0;
+          unsigned char *ctext_chunk;
+          if (finish_encrypt == 1 && tid == num_ptext_chunk - 1) {
+            ctext_chunk = encrypt(
+                pub_key, pub_len,
+                (const unsigned char *)(ptext + MAX_PTEXT_CHUNK_LEN * tid),
+                last_ptext_chunk_len, &ctext_chunk_len);
+            memcpy(ctext + (CTEXT_CHUNK_LEN * tid), ctext_chunk,
+                   ctext_chunk_len);
+          } else {
+            ctext_chunk = encrypt(
+                pub_key, pub_len,
+                (const unsigned char *)(ptext + MAX_PTEXT_CHUNK_LEN * tid),
+                MAX_PTEXT_CHUNK_LEN, &ctext_chunk_len);
+          }
           memcpy(ctext + (CTEXT_CHUNK_LEN * tid), ctext_chunk, ctext_chunk_len);
-        } else {
-          ctext_chunk =
-              encrypt(pub_key, pub_len,
-                      (const unsigned char *)(ptext + MAX_PTEXT_CHUNK_LEN * tid),
-                      MAX_PTEXT_CHUNK_LEN, &ctext_chunk_len);
-        }
-        memcpy(ctext + (CTEXT_CHUNK_LEN * tid), ctext_chunk, ctext_chunk_len);
 #pragma omp critical
-        ctext_len += ctext_chunk_len;
+          ctext_len += ctext_chunk_len;
+        }
       }
+      fwrite(ctext, sizeof(char), ctext_len, dst_file);
+    } else {
+      fwrite(ptext, sizeof(char), ptext_len, dst_file);
     }
-    fwrite(ctext, sizeof(char), ctext_len, ctext_file);
 
     if (finish_encrypt == 1) break;
   }
@@ -288,7 +305,7 @@ int encrypt_file(char *fname, FILE *ctext_file, char *pub_key, size_t pub_len,
   return 0;
 }
 
-int send_data(int sender_fd, FILE *ctext_file) {
+int send_data(int sender_fd, FILE *src_file, int encrypt_on) {
   int status;
   packet_header_t header;
   packet_payload_t payload;
@@ -298,11 +315,12 @@ int send_data(int sender_fd, FILE *ctext_file) {
   char ctext[MAX_PAYLOAD_LEN];
 
   while (1) {
-    size_t ctext_len = fread(ctext, 1, MAX_PAYLOAD_LEN, ctext_file);
+    size_t ctext_len = fread(ctext, 1, MAX_PAYLOAD_LEN, src_file);
     if (ctext_len < MAX_PAYLOAD_LEN) finish_send = 1;
 
     // Send data header
-    create_header(&header, kOpData, kData, ctext_len);
+    opcode_t opcode = (encrypt_on) ? kOpCText : kOpPText;
+    create_header(&header, opcode, kData, ctext_len);
     status = retry_send(sender_fd, header, HEADER_LENGTH, 0);
     free(header);
     if (status == -1) {
@@ -324,8 +342,6 @@ int send_data(int sender_fd, FILE *ctext_file) {
     if (finish_send) break;
   }
 
-  // End of data transfer
-  debug(sender_fd, "Finish sending file");
   return 0;
 }
 
@@ -392,19 +408,25 @@ static void help() {
          "specify server domain, default: localhost");
   printf("%-12s %-20s %-30s\n", "-p [port]", "--port [port]",
          "specify server port, default: 8700");
-  printf("%-16s %-24s %-30s\n", "-t [num-thread]", "--num-thread [num-thread]",
-         "number of thread for file decryption, default: 4");
+  printf("%-16s %-24s %-30s\n", "-e [encrypt-option]",
+         "--encrypt-option [encrypt-option]",
+         "using RSA encryption for file transfer, default: off");
+  printf(
+      "%-16s %-24s %-30s\n", "-t [num-thread]", "--num-thread [num-thread]",
+      "number of thread for file decryption, 0 for no encryption, default: 0");
   printf("%-12s %-20s %-30s\n", "-f [file]", "--file [file]",
          "file name to transfer, enter interactive mode if not specified");
 }
 
 int main(int argc, char *argv[]) {
-  char *host = "localhost", *port = "8700", *fname = NULL, *num_thread = "4";
-  const char optstr[] = "hi:p:t:f:";
+  char *host = "localhost", *port = "8700", *fname = NULL, *num_thread = "4",
+       *encrypt_option = "off";
+  const char optstr[] = "hi:p:e:t:f:";
   const static struct option long_options[] = {
       {"help", no_argument, 0, 'h'},
       {"server-ip", optional_argument, 0, 'i'},
       {"port", optional_argument, 0, 'p'},
+      {"encrypt_option", optional_argument, 0, 'e'},
       {"num-thread", optional_argument, 0, 't'},
       {"file", optional_argument, 0, 'f'}};
   int interactive = 1;
@@ -421,6 +443,14 @@ int main(int argc, char *argv[]) {
         break;
       case 'p':
         port = argv[optind - 1];
+        break;
+      case 'e':
+        encrypt_option = argv[optind - 1];
+        if (strncmp(encrypt_option, "off", 3) != 0 &&
+            strncmp(encrypt_option, "on", 2) != 0) {
+          printf("encrypt option must be \"on\" or \"off\"\n");
+          return -1;
+        }
         break;
       case 't':
         num_thread = argv[optind - 1];
@@ -454,6 +484,20 @@ int main(int argc, char *argv[]) {
     port[strlen(port) - 1] = '\0';
     if (port[0] == '\0') {
       sprintf(port, "8700");
+    }
+    prompt(0, "Please specify encrypt option, default = off");
+    printf("-> ");
+
+    encrypt_option = malloc(sizeof(char) * 3);
+    encrypt_option = fgets(encrypt_option, 3, stdin);
+    encrypt_option[strlen(port) - 1] = '\0';
+    if (encrypt_option[0] == '\0') {
+      sprintf(encrypt_option, "off");
+    }
+    if (strncmp(encrypt_option, "off", 3) != 0 &&
+        strncmp(encrypt_option, "on", 2) != 0) {
+      printf("encrypt option must be \"on\" or \"off\"\n");
+      return -1;
     }
     prompt(0, "Please specify number of threads, default = 4");
     printf("-> ");
@@ -490,10 +534,13 @@ int main(int argc, char *argv[]) {
   // Main process
   int status = 0;
 
-  char *code_pub_key, *code_pri_key;
-  size_t code_pub_len, code_pri_len;
+  char *code_pub_key = "\0", *code_pri_key = "\0";
+  size_t code_pub_len = 0, code_pri_len = 0;
 
-  generate_keys(&code_pub_key, &code_pri_key, &code_pri_len, &code_pub_len);
+  int encrypt_on = strncmp(encrypt_option, "on", 2) == 0 ? 1 : 0;
+
+  if (encrypt_on)
+    generate_keys(&code_pub_key, &code_pri_key, &code_pri_len, &code_pub_len);
 
   info(sender_fd, "Register new file transfer");
   status = register_new_transfer(sender_fd, fname, code_pub_key, code_pub_len,
@@ -508,29 +555,37 @@ int main(int argc, char *argv[]) {
   info(sender_fd, "Waiting for receiver...");
   pthread_t timer_thread;
   pthread_create(&timer_thread, NULL, timer, (void *)&sender_fd);
+
+  // Receive pub key from receiver no matter encryption is on or off
   status = receive_pub_key(sender_fd, fname, &data_pub_key, &data_pub_len,
-                           &fsize, &ctext_fsize);
+                           &fsize, &ctext_fsize, encrypt_on);
   if (status == -1) return -1;
 
-  FILE *ctext_file = tmpfile();
   char sha256_str[65];
-  info(0, "Start file encryption with %s threads", num_thread);
+
+  // Encrypt and checksum
+  FILE *tmp_file = tmpfile();
+  info(0, "Start file preprocess");
   pthread_t encrypt_pbar_thread;
   pthread_create(&encrypt_pbar_thread, NULL, progress_bar, (void *)fsize);
-  status = encrypt_file(fname, ctext_file, data_pub_key, data_pub_len,
-                        sha256_str, atoi(num_thread));
+  status = preprocess_file(fname, tmp_file, data_pub_key, data_pub_len,
+                           sha256_str, encrypt_on, atoi(num_thread));
   while (!pbar_exit) asm("");
-  info(0, "Finish file encryption");
+  accumulated_sz = 0;
+  pbar_exit = 0;
+  info(0, "Finish file preprocess");
   if (status == -1) return -1;
 
-  rewind(ctext_file);
+  // Send file
+  rewind(tmp_file);
   info(sender_fd, "Start file transfer %s", fname);
-  accumulated_sz = 0;
   pthread_t send_pbar_thread;
   pthread_create(&send_pbar_thread, NULL, progress_bar, (void *)ctext_fsize);
-  status = send_data(sender_fd, ctext_file);
+  status = send_data(sender_fd, tmp_file, encrypt_on);
   while (!pbar_exit) asm("");
-  fclose(ctext_file);
+  accumulated_sz = 0;
+  pbar_exit = 0;
+  fclose(tmp_file);
   info(sender_fd, "Finish file transfer %s", fname);
 
   info(sender_fd, "SHA256 checksum: %s", sha256_str);

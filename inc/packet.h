@@ -12,7 +12,8 @@ typedef enum opcode {
   kOpCreate,
   kOpRequest,
   kOpPub,
-  kOpData,
+  kOpPText,
+  kOpCText,
   kOpFin
 } opcode_t;
 
