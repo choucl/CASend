@@ -403,16 +403,16 @@ static void *timer(void *argp) {
 }
 
 static void help() {
-  printf("%-12s %-20s %-30s\n", "-h", "--help", "show this message");
-  printf("%-12s %-20s %-30s\n", "-e", "--encrypt",
+  printf("%-12s %-24s %-30s\n", "-h", "--help", "show this message");
+  printf("%-12s %-24s %-30s\n", "-e", "--encrypt",
          "enable RSA encryption for file transfer, default: off");
-  printf("%-12s %-20s %-30s\n", "-i [ip]", "--server-ip [ip]",
+  printf("%-12s %-24s %-30s\n", "-i [ip]", "--server-ip [ip]",
          "specify server domain, default: localhost");
-  printf("%-12s %-20s %-30s\n", "-p [port]", "--port [port]",
+  printf("%-12s %-24s %-30s\n", "-p [port]", "--port [port]",
          "specify server port, default: 8700");
-  printf("%-16s %-20s %-30s\n", "-t [threads]", "--num-thread [threads]",
+  printf("%-12s %-24s %-30s\n", "-t [threads]", "--num-thread [threads]",
          "number of thread for file decryption, default: 0");
-  printf("%-12s %-20s %-30s\n", "-f [file]", "--file [file]",
+  printf("%-12s %-24s %-30s\n", "-f [file]", "--file [file]",
          "file name to transfer, enter interactive mode if not specified");
 }
 
