@@ -14,7 +14,7 @@ RECEIVER_TARGET := $(BUILD_DIR)/receiver
 
 __dir := $(shell mkdir -p $(BUILD_DIR))
 
-DEBUG = -g -DQUIET=0
+DEBUG = -g -DQUIET=0 -DOPENSSL_API_COMPAT=11001
 CFLAGS = -Wall -I$(INC_DIR) $(DEBUG) -fopenmp
 LDFLAGS = -lpthread -lm -lcrypto -fopenmp
 
