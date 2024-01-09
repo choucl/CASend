@@ -184,6 +184,7 @@ int receive_data(int receiver_fd, FILE *ctext_file) {
       error(receiver_fd, "Receive data failed");
       return -1;
     }
+    accumulated_sz += ctext_len;
     fwrite(ctext, 1, ctext_len, ctext_file);
   }
 
@@ -194,7 +195,7 @@ int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
                  size_t pri_len, char sha256_str[65], int num_thread) {
   FILE *ptext_file;
   char *file_path = malloc(strlen(directory) + strlen(fname));
-  sprintf(file_path, "%s%s", directory, fname);
+  sprintf(file_path, "%s/%s", directory, fname);
   ptext_file = fopen(file_path, "wb");
   if (ptext_file == NULL) {
     error(0, "Fail opening destination file");
@@ -241,8 +242,7 @@ int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
           ptext_len += ptext_chunk_len;
       }
     }
-    accumulated_sz += ptext_len;
-    info(0, "acc size:%zu", accumulated_sz);
+    accumulated_sz += ctext_len;
 
     SHA256_Update(&sha256, (char *)ptext, ptext_len);
     fwrite(ptext, 1, ptext_len, ptext_file);
@@ -438,11 +438,15 @@ int main(int argc, char *argv[]) {
   FILE *ctext_file = tmpfile();
   info(receiver_fd, "Start file transfer: %s/%s", directory, fname);
 
+  pthread_t recv_pbar_thread;
+  pthread_create(&recv_pbar_thread, NULL, progress_bar, (void *)fsize);
   status = receive_data(receiver_fd, ctext_file);
+  while (!pbar_exit) asm("");
+  accumulated_sz = 0;
 
   rewind(ctext_file);
-  pthread_t thread;
-  pthread_create(&thread, NULL, progress_bar, (void *)fsize);
+  pthread_t decrypt_pbar_thread;
+  pthread_create(&decrypt_pbar_thread, NULL, progress_bar, (void *)fsize);
   status = decrypt_file(ctext_file, fname, directory, pri_key, pri_len, sha256_str, atoi(num_thread));
   while (!pbar_exit) asm("");
   fclose(ctext_file);
