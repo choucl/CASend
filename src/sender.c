@@ -417,8 +417,8 @@ static void help() {
 }
 
 int main(int argc, char *argv[]) {
-  char *host = "localhost", *port = "8700", *fname = NULL, *num_thread = "4",
-       encrypt_on = 0;
+  char *host = "localhost", *port = "8700", *fname = NULL, *num_thread = "4";
+  int encrypt_on = 0;
   const char optstr[] = "hei:p:t:f:";
   const static struct option long_options[] = {
       {"help", no_argument, 0, 'h'},
