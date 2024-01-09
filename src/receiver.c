@@ -209,10 +209,9 @@ int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
 
   *ptext_fsize = 0;
   int num_ctext_chunk = num_thread;
-  size_t ctext_chunk_len = 256;
-  int max_ctext_len = num_thread * ctext_chunk_len;
+  int max_ctext_len = num_thread * CTEXT_CHUNK_LEN;
   char ctext[max_ctext_len];
-  char ptext[num_thread * 128];
+  char ptext[num_thread * MAX_PTEXT_CHUNK_LEN];
   int finish_decrypt = 0;
   omp_set_num_threads(num_thread);
 
@@ -223,7 +222,7 @@ int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
     if (ctext_len == 0) break;
 
     if (ctext_len < max_ctext_len) {
-      num_ctext_chunk = ctext_len / ctext_chunk_len;
+      num_ctext_chunk = ctext_len / CTEXT_CHUNK_LEN;
       finish_decrypt = 1;
     }
 
@@ -234,9 +233,9 @@ int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
         size_t ptext_chunk_len;
         unsigned char *ptext_chunk =
             decrypt(pri_key, pri_len,
-                    (const unsigned char *)(ctext + ctext_chunk_len * tid),
-                    ctext_chunk_len, &ptext_chunk_len);
-        memcpy(ptext + (128 * tid), ptext_chunk, ptext_chunk_len);
+                    (const unsigned char *)(ctext + CTEXT_CHUNK_LEN * tid),
+                    CTEXT_CHUNK_LEN, &ptext_chunk_len);
+        memcpy(ptext + (MAX_PTEXT_CHUNK_LEN * tid), ptext_chunk, ptext_chunk_len);
 #pragma omp critical
         ptext_len += ptext_chunk_len;
       }

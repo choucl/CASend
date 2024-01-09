@@ -192,8 +192,8 @@ int receive_pub_key(int sender_fd, char *fname, char **pub_key, size_t *pub_len,
   packet_payload_t sz_payload;
   *fsize = get_fsize(fname);
 
-  *ctext_fsize = (*fsize % 128 == 0) ? (*fsize / 128) : (*fsize / 128) + 1;
-  *ctext_fsize *= 256;
+  *ctext_fsize = (*fsize % MAX_PTEXT_CHUNK_LEN == 0) ? (*fsize / MAX_PTEXT_CHUNK_LEN) : (*fsize / MAX_PTEXT_CHUNK_LEN) + 1;
+  *ctext_fsize *= CTEXT_CHUNK_LEN;
 
   int sz_payload_len = GET_PAYLOAD_PACKET_LEN(sizeof(size_t));
   create_payload(&sz_payload, 0, sizeof(size_t), (char *)ctext_fsize);
@@ -222,13 +222,12 @@ int encrypt_file(char *fname, FILE *ctext_file, char *pub_key, size_t pub_len,
   SHA256_Init(&sha256);
 
   size_t ptext_len;
-  size_t ptext_chunk_len = 128;
-  size_t max_ptext_len = ptext_chunk_len * num_thread;
+  size_t max_ptext_len = MAX_PTEXT_CHUNK_LEN * num_thread;
 
   size_t last_ptext_chunk_len = 0;
   int num_ptext_chunk = num_thread;
 
-  size_t max_ctext_len = 256 * num_thread;
+  size_t max_ctext_len = CTEXT_CHUNK_LEN * num_thread;
   char ctext[max_ctext_len];
 
   int finish_encrypt = 0;
@@ -245,8 +244,8 @@ int encrypt_file(char *fname, FILE *ctext_file, char *pub_key, size_t pub_len,
 
     if (ptext_len < max_ptext_len) {
       finish_encrypt = 1;
-      last_ptext_chunk_len = ptext_len % ptext_chunk_len;
-      num_ptext_chunk = (ptext_len / ptext_chunk_len) + 1;
+      last_ptext_chunk_len = ptext_len % MAX_PTEXT_CHUNK_LEN;
+      num_ptext_chunk = (ptext_len / MAX_PTEXT_CHUNK_LEN) + 1;
     }
     accumulated_sz += ptext_len;
 
@@ -259,16 +258,16 @@ int encrypt_file(char *fname, FILE *ctext_file, char *pub_key, size_t pub_len,
         if (finish_encrypt == 1 && tid == num_ptext_chunk - 1) {
           ctext_chunk =
               encrypt(pub_key, pub_len,
-                      (const unsigned char *)(ptext + ptext_chunk_len * tid),
+                      (const unsigned char *)(ptext + MAX_PTEXT_CHUNK_LEN * tid),
                       last_ptext_chunk_len, &ctext_chunk_len);
-          memcpy(ctext + (256 * tid), ctext_chunk, ctext_chunk_len);
+          memcpy(ctext + (CTEXT_CHUNK_LEN * tid), ctext_chunk, ctext_chunk_len);
         } else {
           ctext_chunk =
               encrypt(pub_key, pub_len,
-                      (const unsigned char *)(ptext + ptext_chunk_len * tid),
-                      ptext_chunk_len, &ctext_chunk_len);
+                      (const unsigned char *)(ptext + MAX_PTEXT_CHUNK_LEN * tid),
+                      MAX_PTEXT_CHUNK_LEN, &ctext_chunk_len);
         }
-        memcpy(ctext + (256 * tid), ctext_chunk, ctext_chunk_len);
+        memcpy(ctext + (CTEXT_CHUNK_LEN * tid), ctext_chunk, ctext_chunk_len);
 #pragma omp critical
         ctext_len += ctext_chunk_len;
       }
