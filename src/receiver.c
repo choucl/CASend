@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <getopt.h>
 #include <netinet/in.h>
+#include <omp.h>
 #include <openssl/sha.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -9,7 +10,6 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <omp.h>
 
 #include "config.h"
 #include "packet.h"
@@ -217,29 +217,28 @@ int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
   omp_set_num_threads(num_thread);
 
   while (1) {
-
     size_t ctext_len = fread(ctext, 1, max_ctext_len, ctext_file);
     size_t ptext_len = 0;
 
-    if (ctext_len == 0)
-      break;
+    if (ctext_len == 0) break;
 
     if (ctext_len < max_ctext_len) {
       num_ctext_chunk = ctext_len / ctext_chunk_len;
       finish_decrypt = 1;
     }
 
-    #pragma omp parallel
+#pragma omp parallel
     {
       int tid = omp_get_thread_num();
       if (tid < num_ctext_chunk) {
         size_t ptext_chunk_len;
-        unsigned char *ptext_chunk = decrypt(pri_key, pri_len,
-                                            (const unsigned char *)(ctext + ctext_chunk_len * tid),
-                                             ctext_chunk_len, &ptext_chunk_len);
+        unsigned char *ptext_chunk =
+            decrypt(pri_key, pri_len,
+                    (const unsigned char *)(ctext + ctext_chunk_len * tid),
+                    ctext_chunk_len, &ptext_chunk_len);
         memcpy(ptext + (128 * tid), ptext_chunk, ptext_chunk_len);
-        #pragma omp critical
-          ptext_len += ptext_chunk_len;
+#pragma omp critical
+        ptext_len += ptext_chunk_len;
       }
     }
     accumulated_sz += ctext_len;
@@ -248,7 +247,6 @@ int decrypt_file(FILE *ctext_file, char *fname, char *directory, char *pri_key,
     fwrite(ptext, 1, ptext_len, ptext_file);
 
     if (finish_decrypt == 1) break;
-
   }
 
   info(0, "Finish file decryption");
@@ -447,7 +445,8 @@ int main(int argc, char *argv[]) {
   rewind(ctext_file);
   pthread_t decrypt_pbar_thread;
   pthread_create(&decrypt_pbar_thread, NULL, progress_bar, (void *)fsize);
-  status = decrypt_file(ctext_file, fname, directory, pri_key, pri_len, sha256_str, atoi(num_thread));
+  status = decrypt_file(ctext_file, fname, directory, pri_key, pri_len,
+                        sha256_str, atoi(num_thread));
   while (!pbar_exit) asm("");
   fclose(ctext_file);
   if (status == -1) return status;

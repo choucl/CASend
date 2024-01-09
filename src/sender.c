@@ -1,5 +1,6 @@
 #include <getopt.h>
 #include <netinet/in.h>
+#include <omp.h>
 #include <openssl/sha.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -9,7 +10,6 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
-#include <omp.h>
 
 #include "config.h"
 #include "packet.h"
@@ -243,8 +243,7 @@ int encrypt_file(char *fname, FILE *ctext_file, char *pub_key, size_t pub_len,
     ptext_len = fread(ptext, sizeof(char), max_ptext_len, src_file);
     SHA256_Update(&sha256, (char *)ptext, ptext_len);
 
-    if (ptext_len == 0)
-      break;
+    if (ptext_len == 0) break;
 
     if (ptext_len < max_ptext_len) {
       finish_encrypt = 1;
@@ -253,33 +252,32 @@ int encrypt_file(char *fname, FILE *ctext_file, char *pub_key, size_t pub_len,
     }
     accumulated_sz += ptext_len;
 
-    #pragma omp parallel
+#pragma omp parallel
     {
       int tid = omp_get_thread_num();
       if (tid < num_ptext_chunk) {
         size_t ctext_chunk_len = 0;
         unsigned char *ctext_chunk;
         if (finish_encrypt == 1 && tid == num_ptext_chunk - 1) {
-          ctext_chunk = encrypt(pub_key, pub_len,
-                               (const unsigned char *)(ptext + ptext_chunk_len * tid),
-                                last_ptext_chunk_len,
-                                &ctext_chunk_len);
+          ctext_chunk =
+              encrypt(pub_key, pub_len,
+                      (const unsigned char *)(ptext + ptext_chunk_len * tid),
+                      last_ptext_chunk_len, &ctext_chunk_len);
           memcpy(ctext + (256 * tid), ctext_chunk, ctext_chunk_len);
         } else {
-          ctext_chunk = encrypt(pub_key, pub_len,
-                               (const unsigned char *)(ptext + ptext_chunk_len * tid),
-                                ptext_chunk_len,
-                                &ctext_chunk_len);
+          ctext_chunk =
+              encrypt(pub_key, pub_len,
+                      (const unsigned char *)(ptext + ptext_chunk_len * tid),
+                      ptext_chunk_len, &ctext_chunk_len);
         }
         memcpy(ctext + (256 * tid), ctext_chunk, ctext_chunk_len);
-        #pragma omp critical
-          ctext_len += ctext_chunk_len;
+#pragma omp critical
+        ctext_len += ctext_chunk_len;
       }
     }
     fwrite(ctext, sizeof(char), ctext_len, ctext_file);
 
     if (finish_encrypt == 1) break;
-
   }
 
   info(0, "Finish file encryption");
@@ -404,7 +402,6 @@ static void help() {
          "number of thread for file decryption, default: 4");
   printf("%-12s %-20s %-30s\n", "-f [file]", "--file [file]",
          "file name to transfer, enter interactive mode if not specified");
-
 }
 
 int main(int argc, char *argv[]) {
@@ -517,16 +514,16 @@ int main(int argc, char *argv[]) {
   info(sender_fd, "Waiting for receiver...");
   pthread_t timer_thread;
   pthread_create(&timer_thread, NULL, timer, (void *)&sender_fd);
-  status =
-      receive_pub_key(sender_fd, fname, &data_pub_key, &data_pub_len, &fsize, &ctext_size);
+  status = receive_pub_key(sender_fd, fname, &data_pub_key, &data_pub_len,
+                           &fsize, &ctext_size);
   if (status == -1) return -1;
 
   pthread_t encrypt_pbar_thread;
   pthread_create(&encrypt_pbar_thread, NULL, progress_bar, (void *)fsize);
   FILE *ctext_file = tmpfile();
   char sha256_str[65];
-  status =
-      encrypt_file(fname, ctext_file, data_pub_key, data_pub_len, sha256_str, atoi(num_thread));
+  status = encrypt_file(fname, ctext_file, data_pub_key, data_pub_len,
+                        sha256_str, atoi(num_thread));
   while (!pbar_exit) asm("");
   if (status == -1) return -1;
   rewind(ctext_file);
