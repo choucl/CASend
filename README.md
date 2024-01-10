@@ -1,5 +1,6 @@
 # CASend
 **Lightweight, Easy-to-use, Encrypted File Transfer Tool**
+
 This tool was designed to give users an intuitive way to transfer files between devices. Users do not need complex authentication procedures to send files to another user. That is, without logging into the sender's device, a recipient could effortlessly obtain the file from the sender using a straightforward 6-digit passcode.
 
 ## Key Features
