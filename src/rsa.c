@@ -1,4 +1,5 @@
 #include <openssl/err.h>
+#include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
 #include <stdio.h>
@@ -44,6 +45,9 @@ int generate_keys(char **pub_key, char **pri_key, size_t *pri_len,
 
   // Free the EVP_PKEY structure
   EVP_PKEY_free(pkey);
+  EVP_PKEY_CTX_free(ctx);
+  BIO_free(pri);
+  BIO_free(pub);
   return 1;
 }
 
@@ -95,6 +99,8 @@ unsigned char *encrypt(char *pub_key, size_t pub_len,
   *ctext_len = outlen;
 
   EVP_PKEY_free(pkey);
+  EVP_PKEY_CTX_free(ctx);
+  BIO_free(pub);
   return out;
 }
 
@@ -143,5 +149,7 @@ unsigned char *decrypt(char *pri_key, size_t pri_len,
   }
 
   EVP_PKEY_free(pkey);
+  EVP_PKEY_CTX_free(ctx);
+  BIO_free(pri);
   return out;
 }

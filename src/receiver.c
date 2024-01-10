@@ -209,6 +209,7 @@ int postprocess_file(FILE *tmp_file, char *fname, char *directory,
   char *file_path = malloc(strlen(directory) + strlen(fname));
   sprintf(file_path, "%s/%s", directory, fname);
   ptext_file = fopen(file_path, "wb");
+  free0(file_path);
   if (ptext_file == NULL) {
     error(0, "Fail opening destination file");
     return -1;
@@ -488,6 +489,10 @@ int main(int argc, char *argv[]) {
   status = compare_checksum(receiver_fd, sha256_str);
   if (status == -1) return status;
   info(receiver_fd, "Finish checksum checking");
+
+  free0(fname);
+  free0(pub_key);
+  free0(pri_key);
 
   if (interactive) {
     free0(host);

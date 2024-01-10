@@ -104,7 +104,7 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
   debug(clientfd, "entry creation complete, code = %d", (*entry)->code);
 
   size_t cipher_code_len;
-  unsigned char *cipher_code;
+  unsigned char *cipher_code = NULL;
   if (key_length > 0) {
     // encryption
     cipher_code =
@@ -114,6 +114,7 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
     cipher_code = (unsigned char *)&(*entry)->code;
     cipher_code_len = sizeof(int);
   }
+  free0(sender_pubkey);
 
   // send code header
   debug(clientfd, "sending ack header");
@@ -143,6 +144,7 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
     return -1;
   }
   free0(send_code_payload);
+  if (cipher_code) free0(cipher_code);
 
   // receive name header
   packet_header_t recv_name_header = malloc(HEADER_LENGTH);
@@ -259,7 +261,7 @@ static int bypass_packet(service_entry_t *entry, int sender_to_receiver,
                          int has_payload, int *transmit_finish) {
   struct timespec tt1, tt2;
   clock_gettime(CLOCK_REALTIME, &tt1);
-  while (entry->receiver_fd == -1 || entry->receiver_fd == -1) {
+  while (entry->sender_fd == -1 || entry->receiver_fd == -1) {
     clock_gettime(CLOCK_REALTIME, &tt2);
     if (tt2.tv_sec - tt1.tv_sec > TIMEOUT_SEC) {
       error(entry->sender_fd, "sender timout for waiting receiver");
@@ -281,10 +283,10 @@ static int bypass_packet(service_entry_t *entry, int sender_to_receiver,
   if (transmit_finish != NULL) {
     *transmit_finish = (get_opcode(data_header) == kOpFin);
   }
-  int payload_len = get_payload_length(data_header);
+  int data_len = get_payload_length(data_header);
 
   if (has_payload) {
-    int payload_buf_len = GET_PAYLOAD_PACKET_LEN(payload_len);
+    int payload_buf_len = GET_PAYLOAD_PACKET_LEN(data_len);
     packet_payload_t payload_buffer = entry->payload_buffer;
     int payload_len = retry_recv(send_fd, payload_buffer, payload_buf_len, 0);
     if ((status = payload_len) <= 0) {
