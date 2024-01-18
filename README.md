@@ -15,6 +15,8 @@ This tool was designed to give users an intuitive way to transfer files between 
 ## Getting Started
 1. Build server and clients
 ```bash
+$ mkdir build && cd build
+$ cmake ..
 $ make
 ```
 2. Run server
