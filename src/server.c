@@ -105,7 +105,8 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
 
   size_t cipher_code_len;
   unsigned char *cipher_code = NULL;
-  if (key_length > 0) {
+  int encrypt_intention = (key_length > 0);
+  if (encrypt_intention) {
     // encryption
     cipher_code =
         encrypt(sender_pubkey, key_length, (unsigned char *)&(*entry)->code,
@@ -114,7 +115,6 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
     cipher_code = (unsigned char *)&(*entry)->code;
     cipher_code_len = sizeof(int);
   }
-  free0(sender_pubkey);
 
   // send code header
   debug(clientfd, "sending ack header");
@@ -144,7 +144,10 @@ static int send_intention_handler(service_entry_t **entry, long clientfd,
     return -1;
   }
   free0(send_code_payload);
-  if (cipher_code) free0(cipher_code);
+  if (encrypt_intention) {
+    free0(sender_pubkey);
+    free0(cipher_code);
+  }
 
   // receive name header
   packet_header_t recv_name_header = malloc(HEADER_LENGTH);
