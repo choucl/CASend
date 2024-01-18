@@ -1,0 +1,20 @@
+include_directories(${CASend_SOURCE_DIR}/inc)
+find_package(OpenMP)
+
+set(COMMON_SOURCES packet.c pbar.c rsa.c sock.c util.c)
+set(LINK_LIBS m pthread crypto)
+
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_C_FLAGS "-DQUIET=0 -DOPENSSL_API_COMPAT=11001")
+set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O0 -DDEBUG")
+set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O2")
+
+add_library(CommonModule ${COMMON_SOURCES})
+add_executable(server server.c)
+add_executable(sender sender.c)
+add_executable(receiver receiver.c)
+target_link_libraries(server CommonModule ${LINK_LIBS})
+target_link_libraries(sender CommonModule ${LINK_LIBS} OpenMP::OpenMP_C)
+target_link_libraries(receiver CommonModule ${LINK_LIBS} OpenMP::OpenMP_C)
