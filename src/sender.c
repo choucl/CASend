@@ -411,22 +411,22 @@ static void help() {
   printf("%-12s %-24s %-30s\n", "-p [port]", "--port [port]",
          "specify server port, default: 8700");
   printf("%-12s %-24s %-30s\n", "-t [threads]", "--num-thread [threads]",
-         "number of thread for file decryption, default: 0");
+         "number of thread for file encryption, default: 4");
   printf("%-12s %-24s %-30s\n", "-f [file]", "--file [file]",
          "file name to transfer, enter interactive mode if not specified");
 }
 
-int main(int argc, char *argv[]) {
+int send_handler(int argc, char *argv[]) {
   char *host = "localhost", *port = "8700", *fname = NULL, *num_thread = "4";
   int encrypt_on = 0;
   const char optstr[] = "hei:p:t:f:";
   const static struct option long_options[] = {
       {"help", no_argument, 0, 'h'},
       {"encrypt", no_argument, 0, 'e'},
-      {"server-ip", optional_argument, 0, 'i'},
-      {"port", optional_argument, 0, 'p'},
-      {"num-thread", optional_argument, 0, 't'},
-      {"file", optional_argument, 0, 'f'}};
+      {"server-ip", required_argument, 0, 'i'},
+      {"port", required_argument, 0, 'p'},
+      {"num-thread", required_argument, 0, 't'},
+      {"file", required_argument, 0, 'f'}};
   int interactive = 1;
   while (1) {
     int c = getopt_long(argc, argv, optstr, long_options, NULL);

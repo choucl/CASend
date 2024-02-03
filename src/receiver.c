@@ -335,17 +335,17 @@ static void help() {
          "number of thread for file decryption, default: 4");
 }
 
-int main(int argc, char *argv[]) {
+int receive_handler(int argc, char *argv[]) {
   char *host = "localhost", *port = "8700", *directory = ".",
        *input_code = NULL, *num_thread = "4";
   const char optstr[] = "hi:p:d:t:c:";
   const static struct option long_options[] = {
       {"help", no_argument, 0, 'h'},
-      {"server-ip", optional_argument, 0, 'i'},
-      {"port", optional_argument, 0, 'p'},
-      {"directory", optional_argument, 0, 'd'},
-      {"num-thread", optional_argument, 0, 't'},
-      {"code", optional_argument, 0, 'c'}};
+      {"server-ip", required_argument, 0, 'i'},
+      {"port", required_argument, 0, 'p'},
+      {"directory", required_argument, 0, 'd'},
+      {"num-thread", required_argument, 0, 't'},
+      {"code", required_argument, 0, 'c'}};
   int interactive = 1;
   while (1) {
     int c = getopt_long(argc, argv, optstr, long_options, NULL);
