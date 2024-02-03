@@ -21,14 +21,14 @@ $ make
 ```
 2. Run server
 ```bash
-$ ./build/server
+$ ./build/bin/server
 ```
 3. Sender
 ```bash
-$ ./build/sender -f hello_world.txt  # this should give a 6-digit passcode
+$ ./build/bin/casend send -f hello_world.txt  # this should give a 6-digit passcode
 ```
 4. Reciever
 ```bash
-$ ./build/receiver -c ******  # fill in with the passcode
+$ ./build/bin/casend receive -c ******  # fill in with the passcode
 ```
 Note: Interactive mode will be entered if file or code is not specified. Use `-h` option for help.
