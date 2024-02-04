@@ -389,7 +389,7 @@ int receive_handler(int argc, char *argv[]) {
     printf("------------------------------------\n");
     printf("          CASend Receiver           \n");
     printf("------------------------------------\n");
-    prompt(0, "Please specify server ip, default = localhost");
+    prompt(0, "Please specify server ip, default = %s", host);
     printf("-> ");
     host = malloc(sizeof(char) * 32);
     host = fgets(host, 32, stdin);
@@ -397,7 +397,7 @@ int receive_handler(int argc, char *argv[]) {
     if (host[0] == '\0') {
       sprintf(host, "localhost");
     }
-    prompt(0, "Please specify server port, default = 8700");
+    prompt(0, "Please specify server port, default = %s", port);
     printf("-> ");
     port = malloc(sizeof(char) * 6);
     port = fgets(port, 6, stdin);

@@ -9,7 +9,11 @@
 void help() {
   printf("CASend - Safe and simple file transfer tool\n");
   printf("Usage:\n");
-  printf("  casend send/receive [flags]\n");
+  printf("  casend <subcommand> [flags]\n");
+  printf("Subcommands:\n");
+  printf("  send     - send a file\n");
+  printf("  receive  - receiver a file with given code\n");
+  printf("  register - register the server configuration\n");
 }
 
 int main(int argc, char *argv[]) {
