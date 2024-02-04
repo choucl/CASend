@@ -14,6 +14,7 @@
 #include "config.h"
 #include "packet.h"
 #include "pbar.h"
+#include "register.h"
 #include "rsa.h"
 #include "sock.h"
 #include "util.h"
@@ -417,7 +418,15 @@ static void help() {
 }
 
 int send_handler(int argc, char *argv[]) {
-  char *host = "localhost", *port = "8700", *fname = NULL, *num_thread = "4";
+  char *fname = NULL, *num_thread = "4";
+  char *host = malloc(sizeof(char) * 100);
+  char *port = malloc(sizeof(char) * 6);
+  if (try_read_config(&host, &port) == -1) {
+    free(host);
+    free(port);
+    host = "localhost";
+    port = "8700";
+  }
   int encrypt_on = 0;
   const char optstr[] = "hei:p:t:f:";
   const static struct option long_options[] = {
@@ -462,7 +471,7 @@ int send_handler(int argc, char *argv[]) {
     printf("----------------------------------\n");
     printf("          CASend Sender           \n");
     printf("----------------------------------\n");
-    prompt(0, "Please specify server ip, default = localhost");
+    prompt(0, "Please specify server ip, default = %s", host);
     printf("-> ");
     host = malloc(sizeof(char) * 32);
     host = fgets(host, 32, stdin);
@@ -470,7 +479,7 @@ int send_handler(int argc, char *argv[]) {
     if (host[0] == '\0') {
       sprintf(host, "localhost");
     }
-    prompt(0, "Please specify server port, default = 8700");
+    prompt(0, "Please specify server port, default = %s", port);
     printf("-> ");
     port = malloc(sizeof(char) * 6);
     port = fgets(port, 6, stdin);

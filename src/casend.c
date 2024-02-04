@@ -3,6 +3,7 @@
 #include "config.h"
 #include "receiver.h"
 #include "sender.h"
+#include "register.h"
 #include "util.h"
 
 void help() {
@@ -26,6 +27,9 @@ int main(int argc, char *argv[]) {
   } else if (strncmp(type, "receive", 7) == 0) {
     // receive
     return receive_handler(argc - 1, &argv[1]);
+  } else if (strncmp(type, "register", 8) == 0) {
+    // register
+    return register_config(argc - 1, &argv[1]);
   } else {
     help();
     fatal(0, "Invalid subcommand: %s", type);

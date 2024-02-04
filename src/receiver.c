@@ -14,6 +14,7 @@
 #include "config.h"
 #include "packet.h"
 #include "pbar.h"
+#include "register.h"
 #include "rsa.h"
 #include "sock.h"
 #include "util.h"
@@ -336,8 +337,15 @@ static void help() {
 }
 
 int receive_handler(int argc, char *argv[]) {
-  char *host = "localhost", *port = "8700", *directory = ".",
-       *input_code = NULL, *num_thread = "4";
+  char *directory = ".", *input_code = NULL, *num_thread = "4";
+  char *host = malloc(sizeof(char) * 100);
+  char *port = malloc(sizeof(char) * 6);
+  if (try_read_config(&host, &port) == -1) {
+    free(host);
+    free(port);
+    host = "localhost";
+    port = "8700";
+  }
   const char optstr[] = "hi:p:d:t:c:";
   const static struct option long_options[] = {
       {"help", no_argument, 0, 'h'},
